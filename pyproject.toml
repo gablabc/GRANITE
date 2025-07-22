@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "granite"
+version = "0.0.1"
+authors = [
+    {name = "Gabriel Laberge", email = "gabriel.laberge@polymtl.ca"},
+]
+description = "Generalized regional framework for identifying agreement in feature-based explanation"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  'graphviz',
+  'numpy>=2.0.0',
+  'matplotlib>=3.7',
+  'pandas>=2.0.0',
+  'scikit-learn>=1.5.0',
+  'ipykernel>=6.9.0',
+  'tqdm>=4.27.0',
+  'shap',
+  'xgboost',
+  'interpret-core',
+  'omegaconf'
+]
+
+[tool.setuptools]
+packages = [
+  "granite",
+  "granite.tree_shap"
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
