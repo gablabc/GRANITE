@@ -8,9 +8,6 @@ import os
 from copy import deepcopy
 from scipy.sparse import csr_matrix
 
-from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
-from sklearn.linear_model import SGDRegressor, SGDClassifier, LogisticRegression
-from sklearn.svm import LinearSVC
 
 from .utils import check_Imap_inv, get_leaf_box, ravel, powerset, key_from_term
 from .utils import get_term_bin_weights, setup_linear, setup_brute_force, setup_treeshap
@@ -18,70 +15,14 @@ from .utils import get_term_bin_weights, setup_linear, setup_brute_force, setup_
 
 
 #######################################################################################
-#                                 Linear & Additive
+#                                       EBMs
 #######################################################################################
-
-
-
-def get_components_linear(h, foreground, background, features):
-    """
-    Compute the Interventional Decomposition of a Linear Model.
-
-    .. math:: h_{i, \mathcal{B}}(x_i) = \omega_i (x_i - \mathbb{E}_{z\sim\mathcal{B}}[z_i])
-
-    Parameters
-    ----------
-    h : model X -> R
-        A sklearn LinearModel or a Pipeline with a LinearModel as the last layer.
-    foreground : (Nf, d) np.ndarray
-        The data points at which to evaluate the decomposition.
-    background : (Nb, d) np.ndarray
-        The data points at which to anchor the decomposition.
-    features : Features
-        A Features object that represents which columns of X are treated as groups.
-
-    Returns
-    -------
-    decomposition : dict{Tuple: np.ndarray}
-        The various components of the decomposition indexed via their feature subset e.g. `decomposition[(0,)]`
-        is a (Nf,) np.ndarray.
-    """
-    SKLEARN_LINEAR = [LinearRegression, Ridge, Lasso, ElasticNet,
-                      SGDRegressor, SGDClassifier, LogisticRegression, LinearSVC]
-
-    # Setup
-    Imap_inv = features.Imap_inv
-    predictor, foreground, background, Imap_inv = setup_linear(h, foreground, background, Imap_inv, SKLEARN_LINEAR)
-    # For regression we explain the direct output
-    if type(predictor) in [LinearRegression, Ridge, Lasso, ElasticNet, SGDRegressor]:
-        h_emptyset_z = predictor.predict(background)
-    # For classification we explain the logit
-    else:
-        h_emptyset_z = predictor.decision_function(background)
-    decomposition = {}
-    decomposition[()] = h_emptyset_z.mean()
-
-    # Compute the additive components
-    w = predictor.coef_.ravel()
-    for j in range(len(Imap_inv)):
-        Imap_inv_j = np.array(Imap_inv[j])
-        # The data is sparse
-        if isinstance(foreground, csr_matrix):
-            Delta = foreground[:, Imap_inv_j].toarray()
-            Delta -= background[:, Imap_inv_j].toarray().mean(0)
-        # The data is dense
-        else:
-            Delta = foreground[:, Imap_inv_j]
-            Delta -= background[:, Imap_inv_j].mean(0)
-        decomposition[(j,)] = np.sum(Delta * w[Imap_inv_j], axis=1)
-
-    return decomposition
 
 
 
 def get_components_ebm(h, foreground, background, features, anchored=True):
     """
-    Compute the Interventional Decomposition of an Explainable Boosting Machine (EBM).
+    Compute the Marginal/Anchored Decomposition of an Explainable Boosting Machine (EBM).
 
     .. math:: h_{i,\mathcal{B}}(x_i)  = h_i(x_i) - \mathbb{E}_{z\sim\mathcal{B}}[h_i(z_i)]
 
@@ -270,7 +211,7 @@ def _get_anchored_components_u(decomposition, h, key, Imap_inv, x_idxs, foregrou
 
 def get_components_brute_force(h, foreground, background, features, interactions=1, anchored=True, show_bar=False):
     """
-    Compute the Anchored/Interventional Decomposition of any black box.
+    Compute the Marginal/Anchored Decomposition of any black box.
 
     .. math::
 
@@ -354,7 +295,7 @@ def get_components_brute_force(h, foreground, background, features, interactions
 
 def get_components_adaptive(h, background, features, tolerance=0.05, show_bar=False, precompute=None):
     """
-    Compute the AnchoredDecomposition of any black box 
+    Compute the Marginal/Anchored Decomposition of any black box 
 
     .. math::
 
@@ -464,7 +405,7 @@ def get_components_adaptive(h, background, features, tolerance=0.05, show_bar=Fa
 
 def get_components_tree(model, foreground, background, features, anchored=False, algorithm='recurse'):
     """
-    Compute the additve terms of the Anchored/Interventional Decomposition of a tree ensemble 
+    Compute the main effects of the Marginal/Anchored Decomposition of a tree ensemble 
     (e.g. Random Forest and Gradient Boosted Trees).
 
     .. math::
