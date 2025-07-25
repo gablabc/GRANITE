@@ -1,0 +1,6 @@
+granite.egg-info
+*.pyc
+*.so
+*.sh
+*joblib
+granite/cached_data/

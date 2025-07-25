@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <iomanip>
 #include <stdexcept>
+#include <tuple>
 #include <set>
 #include "progressbar.hpp"
 #include "utils.hpp"
@@ -52,7 +53,7 @@ int leaf_additive(Matrix<double> &X_f,
         stack<tuple<int, int, bool>> curr_path;
         FeatureSet S_L(d, Imap);        // Class representation of the set S_L
         leaf_idx = 0;                    // Each time we visit a leaf we increment by one
-        curr_path.push(make_tuple(0, 0, false));
+        curr_path.push(std::make_tuple(0, 0, false));
 
         // Explore the whole tree via a stack
         while ( !curr_path.empty() ){
@@ -67,8 +68,8 @@ int leaf_additive(Matrix<double> &X_f,
             if (curr_feature >= 0){
                 // Add the feature to the set S_L
                 S_L.add_feature(curr_feature);
-                curr_path.push(make_tuple(child_right[t][curr_node_index], curr_depth+1, true));
-                curr_path.push(make_tuple(child_left[t][ curr_node_index], curr_depth+1, false));
+                curr_path.push(std::make_tuple(child_right[t][curr_node_index], curr_depth+1, true));
+                curr_path.push(std::make_tuple(child_left[t][ curr_node_index], curr_depth+1, false));
             }
             // At a leaf
             else {
@@ -210,7 +211,7 @@ int leaf_treeshap(Matrix<double> &X_f,
         stack<tuple<int, int, bool>> curr_path;
         FeatureSet S_L(d, Imap);         // Class representation of the set S_L
         leaf_idx = 0;                    // Each time we visit a leaf we increment by one
-        curr_path.push(make_tuple(0, 0, false));
+        curr_path.push(std::make_tuple(0, 0, false));
 
         // Explore the whole tree via a stack
         while ( !curr_path.empty() ){
@@ -225,8 +226,8 @@ int leaf_treeshap(Matrix<double> &X_f,
             if (curr_feature >= 0){
                 // Add the feature to the set S_L
                 S_L.add_feature(curr_feature);
-                curr_path.push(make_tuple(child_right[t][curr_node_index], curr_depth+1, true));
-                curr_path.push(make_tuple(child_left[t][ curr_node_index], curr_depth+1, false));
+                curr_path.push(std::make_tuple(child_right[t][curr_node_index], curr_depth+1, true));
+                curr_path.push(std::make_tuple(child_left[t][ curr_node_index], curr_depth+1, false));
             }
             // At a leaf
             else {

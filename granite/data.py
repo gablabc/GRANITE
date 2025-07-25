@@ -13,7 +13,7 @@ from sklearn.utils import shuffle
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.impute import SimpleImputer
 
-from pyfd.features import Features
+from granite.features import Features
 
 
 GITHUB_DATA_URL = "https://github.com/gablabc/PyFD/raw/master/datasets/"
