@@ -136,6 +136,7 @@ class FDTree(ABC):
             i: int
             ) -> np.ndarray:
         """ Return a list of split candiates along feature i """
+        breakpoint()
         if self.feature_objs[i].type == "num":
             x_i_unique = np.unique(x_i)
             if len(x_i_unique) < 40:
@@ -369,7 +370,6 @@ class FDTree(ABC):
             use_latex: bool
             ):
         """ Modifies rules in-place """
-
         if node.child_left is None:
             if len(curr_rule) > 1:
                 # Simplify long rule lists if possible

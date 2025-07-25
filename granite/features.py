@@ -109,7 +109,7 @@ class integer_feature(object):
         self.type = "num_int"
         self.min = np.array(values).min()
         self.max = np.array(values).max()
-        self.card = int(self.max - self.min + 1)
+        self.card = len(np.unique(values))
 
     # map feature value to very small, small, medium, large, very large
     def __call__(self, x):
