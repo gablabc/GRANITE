@@ -1,9 +1,11 @@
+from typing import List, Tuple, Dict, Optional
 from copy import deepcopy
 import numpy as np
 from abc import ABC, abstractmethod
 from heapq import heappush, heappop
 
 from .decompositions import get_h_add
+from .features import Features
 
 
 SYMBOLS = { True :
@@ -23,10 +25,10 @@ SYMBOLS = { True :
 
 class Node(object):
     """ Node in a Decision Tree """
-    def __init__(self, instances_idx, depth, loa):
+    def __init__(self, instances_idx: List[int], depth: int, loss: float):
         self.N_samples = len(instances_idx)
         self.depth = depth
-        self.loa = loa
+        self.loss = loss
         # Placeholders
         self.feature = None
         self.threshold = None
@@ -36,7 +38,7 @@ class Node(object):
         self.objectives = []
 
 
-    def update(self, feature, threshold):
+    def update(self, feature: int, threshold: float):
         self.feature = feature
         self.threshold = threshold
 
@@ -46,12 +48,15 @@ class Node(object):
 class FDTree(ABC):
     """ Train a binary tree to minimize : LoA + alpha |L| """
 
-    def __init__(self, features,
-                 max_depth=3,
-                 min_samples_leaf=20,
-                 branching_per_node=1,
-                 alpha=0.05,
-                 save_losses=False):
+    def __init__(
+            self,
+            features: Features,
+            max_depth: int=3,
+            min_samples_leaf: int=20,
+            branching_per_node: int=1,
+            alpha: float=0.05,
+            save_losses: bool=False
+            ):
         """
         Parameters
         ----------
@@ -78,7 +83,11 @@ class FDTree(ABC):
         self.save_losses = save_losses
 
 
-    def print(self, verbose=False, return_string=False):
+    def print(
+            self,
+            verbose: bool=False,
+            return_string: bool=False
+            ) -> Optional[str]:
         """
         Print the FDTree
 
@@ -92,16 +101,21 @@ class FDTree(ABC):
         tree_strings = []
         self.region_idx = 0
         self._recurse_print_tree_str(self.root, verbose=verbose, tree_strings=tree_strings)
-        tree_strings.append(f"Final LoA {self.final_loa:.4f}")
+        tree_strings.append(f"Final Loss {self.final_loss:.4f}")
         if return_string:
             return "\n".join(tree_strings)
         else:
             print("\n".join(tree_strings))
 
 
-    def _recurse_print_tree_str(self, node, verbose=False, tree_strings=[]):
+    def _recurse_print_tree_str(
+            self,
+            node: Node,
+            verbose: bool=False,
+            tree_strings: List[str]=[]
+            ):
         if verbose:
-            tree_strings.append("|   " * node.depth + f"LoA {node.loa:.4f}")
+            tree_strings.append("|   " * node.depth + f"Loss {node.loss:.4f}")
             tree_strings.append("|   " * node.depth + f"Samples {node.N_samples:d}")
         # Leaf
         if node.child_left is None:
@@ -116,7 +130,11 @@ class FDTree(ABC):
             self._recurse_print_tree_str(node=node.child_right, verbose=verbose, tree_strings=tree_strings)
 
 
-    def _get_split_candidates(self, x_i, i):
+    def _get_split_candidates(
+            self,
+            x_i: np.ndarray,
+            i: int
+            ) -> np.ndarray:
         """ Return a list of split candiates along feature i """
         if self.feature_objs[i].type == "num":
             x_i_unique = np.unique(x_i)
@@ -156,18 +174,22 @@ class FDTree(ABC):
         return splits
 
 
-    def _get_feature_splits_heapq(self, curr_node, instances_idx):
+    def _get_feature_splits_heapq(
+            self,
+            curr_node: Node,
+            instances_idx: np.ndarray
+            ):
         """ Compute a heapqueue for splits along each feature """
         heapq = []
         for feature in range(self.D):
-            splits, loa_left, loa_right = self._get_objective_for_splits(instances_idx, feature)
+            splits, loss_left, loss_right = self._get_objective_for_splits(instances_idx, feature)
             # No split was conducted
             if len(splits) == 0:
                 pass
             else:
 
                 # Otherwise search for the best split
-                objective = loa_right + loa_left
+                objective = loss_right + loss_left
                 if self.save_losses:
                     curr_node.splits.append(splits)
                     curr_node.objectives.append(objective/len(instances_idx))
@@ -175,16 +197,20 @@ class FDTree(ABC):
                 best_split_idx = np.argmin(objective)
                 # The heap contains (obj, feature, split_value, obj_left, obj_right)
                 heappush(heapq, (objective[best_split_idx], feature, splits[best_split_idx],
-                                loa_left[best_split_idx] / self.N, loa_right[best_split_idx] / self.N))
+                                loss_left[best_split_idx] / self.N, loss_right[best_split_idx] / self.N))
 
         return heapq
 
 
     @abstractmethod
-    def _get_objective_for_splits(self, instances_idx, feature):
+    def _get_objective_for_splits(
+            self,
+            instances_idx,
+            feature
+            ):
         """
         Get the objective value at each split.
-        
+
         Parameters
         ----------
         instances_idx : np.ndarray
@@ -201,25 +227,30 @@ class FDTree(ABC):
         pass
 
 
-    def _tree_builder(self, instances_idx, depth, loa):
+    def _tree_builder(
+            self,
+            instances_idx: np.ndarray,
+            depth: int,
+            loss: float
+            ) -> Tuple[Node, float, int]:
         # Create a node
-        curr_node = Node(instances_idx, depth, loa*self.loa_factor)
+        curr_node = Node(instances_idx, depth, loss*self.loss_factor)
 
         # Subobjective at that node
-        node_loa = loa * self.loa_factor
+        node_loss = loss * self.loss_factor
 
-        # Stop the tree growth if the maximum depth is attained, 
-        # or no further split can be justified given the regularization alpha, 
+        # Stop the tree growth if the maximum depth is attained,
+        # or no further split can be justified given the regularization alpha,
         # or any further split will yield leaves with too few samples
-        if depth >= self.max_depth or node_loa < self.alpha or len(instances_idx) < 2 * self.min_samples_leaf:
-            return curr_node, node_loa + self.alpha, 1
+        if depth >= self.max_depth or node_loss < self.alpha or len(instances_idx) < 2 * self.min_samples_leaf:
+            return curr_node, node_loss + self.alpha, 1
 
         # Otherwise get a heapq of split candidates
         heapq = self._get_feature_splits_heapq(curr_node, instances_idx)
 
-        # Stop the tree growth if no further splits are
+        # Stop the tree growth if no further splits are possible
         if len(heapq) == 0:
-            return curr_node, node_loa + self.alpha, 1
+            return curr_node, node_loss + self.alpha, 1
 
         # If the next split is guaranteed to be a leaf, we do not need to branch
         if depth + 1 == self.max_depth:
@@ -231,7 +262,7 @@ class FDTree(ABC):
         n_leaves_per_branch = np.zeros(n_branching, dtype=np.int32)
         for branch in range(n_branching):
 
-            _, feature_split, split_value, loa_left, loa_right = heappop(heapq)
+            _, feature_split, split_value, loss_left, loss_right = heappop(heapq)
 
             # Select instances of the chosen feature
             x_i = self.X[instances_idx, feature_split]
@@ -242,34 +273,37 @@ class FDTree(ABC):
             # Go left
             nodes_per_branch[branch].child_left, subobjective_left, n_leaves_left = \
                                 self._tree_builder(instances_idx[x_i <= split_value],
-                                                    depth=depth+1, loa=loa_left)
+                                                    depth=depth+1, loss=loss_left)
             # Go right
             nodes_per_branch[branch].child_right, subobjective_right, n_leaves_right = \
                                 self._tree_builder(instances_idx[x_i > split_value],
-                                                    depth=depth+1, loa=loa_right)
+                                                    depth=depth+1, loss=loss_right)
             n_leaves_per_branch[branch] = n_leaves_left + n_leaves_right
             subobjective_per_branch[branch] = subobjective_left + subobjective_right
 
         # Identify the best branch from the current node
         best_branch = np.argmin(subobjective_per_branch)
 
-        # The best solution resulting from branching has introduced many leaves. Hence, if the reduction in LoA is
+        # The best solution resulting from branching has introduced many leaves. Hence, if the reduction in loss is
         # not sufficient, it is best not to split and define the current node as a leaf
-        if node_loa + self.alpha <= subobjective_per_branch[best_branch]:
-            return curr_node, node_loa + self.alpha, 1
+        if node_loss + self.alpha <= subobjective_per_branch[best_branch]:
+            return curr_node, node_loss + self.alpha, 1
         else:
             # Branching lead to a better solution and so we go up in the recursion
             return nodes_per_branch[best_branch], subobjective_per_branch[best_branch], n_leaves_per_branch[best_branch]
 
 
-    def predict(self, X_new):
+    def predict(
+            self,
+            X_new: np.ndarray
+            ) -> np.ndarray[np.int32]:
         """
-        Compute the region index of each instance 
-        
+        Compute the region index of each instancec
+
         Parameters
         ----------
         X_new : (N, n_features) np.ndarray
-            The data to assign to each lead (region) of the FDTree. The ith column of `X_new` must be the 
+            The data to assign to each lead (region) of the FDTree. The ith column of `X_new` must be the
             ith feature in the Features object passed to the constructor.
 
         Returns
@@ -286,7 +320,14 @@ class FDTree(ABC):
             return regions
 
 
-    def _tree_traversal_predict(self, node, instances_idx, X_new, regions):
+    def _tree_traversal_predict(
+            self,
+            node: Node,
+            instances_idx: np.ndarray,
+            X_new: np.ndarray,
+            regions: np.ndarray[np.int32]
+            ):
+        """ Modifies `regions` in-place """
 
         if node.child_left is None:
             # Label the instances at the leaf
@@ -305,7 +346,10 @@ class FDTree(ABC):
                                          X_new, regions)
 
 
-    def rules(self, use_latex=False):
+    def rules(
+            self,
+            use_latex:bool=False
+            ) -> Dict[int, str]:
         """ Return the rule for each leaf """
         self.region_idx  = 0
         if self.n_regions == 1:
@@ -317,12 +361,20 @@ class FDTree(ABC):
             return rules
 
 
-    def _tree_traversal_rules(self, node, rules, curr_rule, use_latex):
+    def _tree_traversal_rules(
+            self,
+            node: Node,
+            rules: Dict[int, str],
+            curr_rule: List[str],
+            use_latex: bool
+            ):
+        """ Modifies rules in-place """
 
         if node.child_left is None:
             if len(curr_rule) > 1:
                 # Simplify long rule lists if possible
-                curr_rule_copy = self._postprocess_rules(curr_rule, use_latex)
+                curr_rule_copy = self._postprocess_numerical_rules(curr_rule, use_latex)
+                curr_rule_copy = self._postprocess_categorical_rules(curr_rule_copy, use_latex)
                 if len(curr_rule_copy) > 1:
                     rules[self.region_idx] = "(" + SYMBOLS[use_latex]["and_str"].join(curr_rule_copy) + ")"
                 else:
@@ -347,12 +399,11 @@ class FDTree(ABC):
                 if len(cats_left) == 1:
                     curr_rule.append(f"{feature_name}={cats_left[0]}")
                 else:
-                    curr_rule.append(f"{feature_name} " + SYMBOLS[use_latex]['in_set'] \
-                                     + " [" + ",".join(cats_left)+"]")
+                    curr_rule.append(f"{feature_name} " + SYMBOLS[use_latex]['in_set']
+                                     + " {" + ",".join(cats_left)+"}")
             # Numerical
             else:
-                curr_rule.append(feature_name + SYMBOLS[use_latex]['leq'] +\
-                                f"{node.threshold:.2f}")
+                curr_rule.append(feature_name + SYMBOLS[use_latex]['leq'] + f"{node.threshold:.2f}")
 
 
             # Go left
@@ -369,19 +420,22 @@ class FDTree(ABC):
                 if len(cats_right) == 1:
                     curr_rule.append(f"{feature_name}={cats_right[0]}")
                 else:
-                    curr_rule.append(f"{feature_name} " + SYMBOLS[use_latex]['in_set'] \
-                                     + " [" + ",".join(cats_right)+"]")
+                    curr_rule.append(f"{feature_name} " + SYMBOLS[use_latex]['in_set']
+                                     + " {" + ",".join(cats_right) +"}")
             # Numerical
             else:
-                curr_rule.append(feature_name + SYMBOLS[use_latex]['up'] +\
-                                f"{node.threshold:.2f}")
+                curr_rule.append(feature_name + SYMBOLS[use_latex]['up'] + f"{node.threshold:.2f}")
 
             # Go right
             self._tree_traversal_rules(node.child_right, rules, curr_rule, use_latex)
             curr_rule.pop()
 
 
-    def _postprocess_rules(self, curr_rule, use_latex):
+    def _postprocess_numerical_rules(
+            self,
+            curr_rule: List[str],
+            use_latex: bool
+            ) -> List[str]:
         """
         Simplify numerical rules
         - Remove redundancy x1>3 and x1>5 becomes x1>5
@@ -397,8 +451,7 @@ class FDTree(ABC):
         # There are splits
         if splits_0 or splits_1:
             splits = np.array(splits_0 + splits_1)
-            select_features, inv, counts = np.unique(splits[:, 0], 
-                                        return_inverse=True, return_counts=True)
+            select_features, inv, counts = np.unique(splits[:, 0], return_inverse=True, return_counts=True)
             # There is redundancy
             if np.any(counts >= 2):
                 # Iterate over redundant features
@@ -407,9 +460,7 @@ class FDTree(ABC):
                     idxs = np.where(inv == i)[0]
                     # Remove the redundant rules
                     for idx in idxs:
-                        curr_rule_copy.remove(select_feature+\
-                                              separators[int(splits[idx, 2])]+\
-                                              splits[idx, 1])
+                        curr_rule_copy.remove(select_feature+ separators[int(splits[idx, 2])]+ splits[idx, 1])
                     # Sort the rules in ascending order of threshold
                     argsort = idxs[np.argsort(splits[idxs, 1].astype(float))]
                     thresholds = splits[argsort, 1]
@@ -438,6 +489,49 @@ class FDTree(ABC):
         return curr_rule_copy
 
 
+
+
+    def _postprocess_categorical_rules(
+            self,
+            curr_rule: List[str],
+            use_latex: bool
+            ) -> List[str]:
+        """
+        Simplify categorical rules
+        - x in {0, 1, 2} and x in {1, 2, 3} becomes x in {1, 2}
+        """
+
+        curr_rule_copy = deepcopy(curr_rule)
+        separator = SYMBOLS[use_latex]["in_set"]
+        features_split = [rule.split(separator) for rule in curr_rule_copy if separator in rule]
+        # There are splits
+        if features_split:
+            splits = np.array(features_split)
+            select_features, inv, counts = np.unique(splits[:, 0], return_inverse=True, return_counts=True)
+            # There is redundancy
+            if np.any(counts >= 2):
+                # Iterate over redundant features
+                for i in np.where(counts >= 2)[0]:
+                    select_feature = select_features[i]
+                    idxs = np.where(inv == i)[0]
+                    new_set = None
+                    # Remove the redundant rules
+                    for idx in idxs:
+                        curr_rule_copy.remove(select_feature + separator + splits[idx, 1])
+                        current_set = splits[idx, 1][2:-1].split(",")
+                        if new_set is None:
+                            new_set = current_set
+                        else:
+                            new_set = [j for j in current_set if j in new_set]
+                    new_rule = select_feature + SYMBOLS[use_latex]["in_set"] + " {" + ",".join(new_set) + "}"
+                    # Add the new rule
+                    curr_rule_copy.append(new_rule)
+
+        return curr_rule_copy
+
+
+
+
 class CoE_Tree(FDTree):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -462,13 +556,13 @@ class CoE_Tree(FDTree):
         assert np.shape(decomposition[(0,)]) == (self.N, self.N), "An Anchored decomposition with foreground=background is needed"
         self.H_add = get_h_add(decomposition)
         self.h = decomposition[()]
-        self.loa_factor = 1 / self.h.var() # To have an loa [0, 1]
+        self.loss_factor = 1 / self.h.var() # To have an loss [0, 1]
         self.n_regions = 0
-        loa = np.mean((self.h - self.H_add.mean(1))**2)
+        loss = np.mean((self.h - self.H_add.mean(1))**2)
         # Start recursive tree growth
         self.root, self.final_objective, self.n_regions = \
-                self._tree_builder(np.arange(self.N), depth=0, loa=loa)
-        self.final_loa = self.final_objective - self.alpha * self.n_regions
+                self._tree_builder(np.arange(self.N), depth=0, loss=loss)
+        self.final_loss = self.final_objective - self.alpha * self.n_regions
         return self
 
 
@@ -482,8 +576,8 @@ class CoE_Tree(FDTree):
             return [], [], []
 
         # Otherwise we optimize the objective
-        loa_left = np.zeros(len(splits))
-        loa_right = np.zeros(len(splits))
+        loss_left = np.zeros(len(splits))
+        loss_right = np.zeros(len(splits))
         to_keep = np.zeros((len(splits))).astype(bool)
 
         h = self.h[instances_idx]
@@ -492,10 +586,10 @@ class CoE_Tree(FDTree):
             left = instances_idx[x_i <= split].reshape((-1, 1))
             right = instances_idx[x_i > split].reshape((-1, 1))
             to_keep[i] = min(len(left), len(right)) >= self.min_samples_leaf
-            loa_left[i]  = np.sum((h[x_i <= split] - self.H_add[left, left.T].mean(-1))**2)
-            loa_right[i] = np.sum((h[x_i > split]  - self.H_add[right, right.T].mean(-1))**2)
+            loss_left[i]  = np.sum((h[x_i <= split] - self.H_add[left, left.T].mean(-1))**2)
+            loss_right[i] = np.sum((h[x_i > split]  - self.H_add[right, right.T].mean(-1))**2)
 
-        return splits[to_keep], loa_left[to_keep], loa_right[to_keep]
+        return splits[to_keep], loss_left[to_keep], loss_right[to_keep]
 
 
 
@@ -529,12 +623,12 @@ class PDP_PFI_Tree(FDTree):
         for i, key in enumerate(additive_keys):
             self.H[..., i] = decomposition[key]
 
-        self.loa_factor = 1 / self.h.var() # To have an loa 0-100%
-        loa = np.mean(np.sum((self.H.mean(0) + self.H.mean(1))**2, axis=-1))
+        self.loss_factor = 1 / self.h.var() # To have an loss 0-100%
+        loss = np.mean(np.sum((self.H.mean(0) + self.H.mean(1))**2, axis=-1))
         # Start recursive tree growth
         self.root, self.final_objective, self.n_regions = \
-                self._tree_builder(np.arange(self.N), depth=0, loa=loa)
-        self.final_loa = self.final_objective - self.alpha * self.n_regions
+                self._tree_builder(np.arange(self.N), depth=0, loss=loss)
+        self.final_loss = self.final_objective - self.alpha * self.n_regions
         return self
 
 
@@ -548,8 +642,8 @@ class PDP_PFI_Tree(FDTree):
             return [], [], []
 
         # Otherwise we optimize the objective
-        loa_left = np.zeros(len(splits))
-        loa_right = np.zeros(len(splits))
+        loss_left = np.zeros(len(splits))
+        loss_right = np.zeros(len(splits))
         to_keep = np.zeros((len(splits))).astype(bool)
 
         # Iterate over all splits
@@ -559,10 +653,10 @@ class PDP_PFI_Tree(FDTree):
             to_keep[i] = min(len(left), len(right)) >= self.min_samples_leaf
             H_left = self.H[left, left.T]
             H_right = self.H[right, right.T]
-            loa_left[i] = np.sum((H_left.mean(0) + H_left.mean(1))**2)
-            loa_right[i] = np.sum((H_right.mean(0) + H_right.mean(1))**2)
+            loss_left[i] = np.sum((H_left.mean(0) + H_left.mean(1))**2)
+            loss_right[i] = np.sum((H_right.mean(0) + H_right.mean(1))**2)
 
-        return splits[to_keep], loa_left[to_keep], loa_right[to_keep]
+        return splits[to_keep], loss_left[to_keep], loss_right[to_keep]
 
 
 
@@ -597,15 +691,15 @@ class GADGET_PDP(FDTree):
         for i, key in enumerate(additive_keys):
             self.R[..., i] = decomposition[key] + self.h
 
-        self.loa_factor = 1 / self.h.var() # To have an loa 0-100%
-        loa = np.mean(np.sum((self.R - self.R.mean(axis=0, keepdims=True) -
+        self.loss_factor = 1 / self.h.var() # To have an loss 0-100%
+        loss = np.mean(np.sum((self.R - self.R.mean(axis=0, keepdims=True) -
                                 self.R.mean(axis=1, keepdims=True) +
                                 self.R.mean(axis=0, keepdims=True).mean(axis=1, keepdims=True))**2,
                                 axis=-1))
         # Start recursive tree growth
         self.root, self.final_objective, self.n_regions = \
-                self._tree_builder(np.arange(self.N), depth=0, loa=loa)
-        self.final_loa = self.final_objective - self.alpha * self.n_regions
+                self._tree_builder(np.arange(self.N), depth=0, loss=loss)
+        self.final_loss = self.final_objective - self.alpha * self.n_regions
         return self
 
 
@@ -619,8 +713,8 @@ class GADGET_PDP(FDTree):
             return [], [], []
 
         # Otherwise we optimize the objective
-        loa_left = np.zeros(len(splits))
-        loa_right = np.zeros(len(splits))
+        loss_left = np.zeros(len(splits))
+        loss_right = np.zeros(len(splits))
         to_keep = np.zeros((len(splits))).astype(bool)
 
         # Iterate over all splits
@@ -633,82 +727,82 @@ class GADGET_PDP(FDTree):
             errors_left = (R_left - R_left.mean(axis=0, keepdims=True) -
                             R_left.mean(axis=1, keepdims=True) +
                             R_left.mean(axis=0, keepdims=True).mean(axis=1, keepdims=True))**2
-            loa_left[i] = errors_left.sum(-1).mean(-1).sum()
+            loss_left[i] = errors_left.sum(-1).mean(-1).sum()
             errors_right = (R_right - R_right.mean(axis=0, keepdims=True) -
                             R_right.mean(axis=1, keepdims=True) +
                             R_right.mean(axis=0, keepdims=True).mean(axis=1, keepdims=True))**2
-            loa_right[i] = errors_right.sum(-1).mean(-1).sum()
+            loss_right[i] = errors_right.sum(-1).mean(-1).sum()
 
-        return splits[to_keep], loa_left[to_keep], loa_right[to_keep]
+        return splits[to_keep], loss_left[to_keep], loss_right[to_keep]
 
 
 
-class CART(FDTree):
-    """
-    Classic CART that minimizes the Squared error
+# class CART(FDTree):
+#     """
+#     Classic CART that minimizes the Squared error
 
-    .. math::
+#     .. math::
  
-        \sum_{\ell \in L} \sum_{x^{(i)}\in \ell} ( h(x^{(i)}) - v_\ell ) ^ 2
+#         \sum_{\ell \in L} \sum_{x^{(i)}\in \ell} ( h(x^{(i)}) - v_\ell ) ^ 2
 
-    This class has two purposes
+#     This class has two purposes
 
-        - Find naive regions that do not take feature interactions into account. As such, it acts as a baseline.
-        - Predict feature x_i given the remaining features x_{-i}. This can be used to estimate conditional expectations.
+#         - Find naive regions that do not take feature interactions into account. As such, it acts as a baseline.
+#         - Predict feature x_i given the remaining features x_{-i}. This can be used to estimate conditional expectations.
 
-    """
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-
-    def fit(self, X, target):
-        """
-        Fit CART
-
-        Parameters
-        ----------
-        X : (N, n_features) np.ndarray
-            The data on which to fit the tree. The ith column of `X` must be the ith feature
-            in the Features object passed to the constructor.
-        target : (N,)
-            Target to predict with regression trees.
-        """
-        self.X = X
-        self.N, self.D = X.shape
-        assert target.shape == (self.N,), "The target must have shape (N,)"
-        self.target = target
-        self.loa_factor = 1 / self.target.var() # To have an loss [0, 1]
-        loa = self.target.var()
-        # Start recursive tree growth
-        self.root, self.final_objective, self.n_regions = \
-                self._tree_builder(np.arange(self.N), depth=0, loa=loa)
-        self.final_loa = self.final_objective - self.alpha * self.n_regions
-        return self
+#     """
+#     def __init__(self, *args, **kwargs):
+#         super().__init__(*args, **kwargs)
 
 
-    def _get_objective_for_splits(self, instances_idx, feature):
-        x_i = self.X[instances_idx, feature]
+#     def fit(self, X, target):
+#         """
+#         Fit CART
 
-        splits = self._get_split_candidates(x_i, feature)
+#         Parameters
+#         ----------
+#         X : (N, n_features) np.ndarray
+#             The data on which to fit the tree. The ith column of `X` must be the ith feature
+#             in the Features object passed to the constructor.
+#         target : (N,)
+#             Target to predict with regression trees.
+#         """
+#         self.X = X
+#         self.N, self.D = X.shape
+#         assert target.shape == (self.N,), "The target must have shape (N,)"
+#         self.target = target
+#         self.loa_factor = 1 / self.target.var() # To have an loss [0, 1]
+#         loa = self.target.var()
+#         # Start recursive tree growth
+#         self.root, self.final_objective, self.n_regions = \
+#                 self._tree_builder(np.arange(self.N), depth=0, loa=loa)
+#         self.final_loa = self.final_objective - self.alpha * self.n_regions
+#         return self
 
-        # No split possible
-        if len(splits) == 0:
-            return [], [], [], [], []
 
-        # Otherwise we optimize the objective
-        objective_left = np.zeros(len(splits))
-        objective_right = np.zeros(len(splits))
-        to_keep = np.zeros((len(splits))).astype(bool)
+#     def _get_objective_for_splits(self, instances_idx, feature):
+#         x_i = self.X[instances_idx, feature]
 
-        # Iterate over all splits
-        for i, split in enumerate(splits):
-            left = instances_idx[x_i <= split]
-            right = instances_idx[x_i > split]
-            to_keep[i] = min(len(left), len(right)) >= self.min_samples_leaf
-            objective_left[i] = np.sum((self.target[left] - self.target[left].mean())**2)
-            objective_right[i] = np.sum((self.target[right] - self.target[right].mean())**2)
+#         splits = self._get_split_candidates(x_i, feature)
 
-        return splits[to_keep], objective_left[to_keep], objective_right[to_keep]
+#         # No split possible
+#         if len(splits) == 0:
+#             return [], [], [], [], []
+
+#         # Otherwise we optimize the objective
+#         objective_left = np.zeros(len(splits))
+#         objective_right = np.zeros(len(splits))
+#         to_keep = np.zeros((len(splits))).astype(bool)
+
+#         # Iterate over all splits
+#         for i, split in enumerate(splits):
+#             left = instances_idx[x_i <= split]
+#             right = instances_idx[x_i > split]
+#             to_keep[i] = min(len(left), len(right)) >= self.min_samples_leaf
+#             objective_left[i] = np.sum((self.target[left] - self.target[left].mean())**2)
+#             objective_right[i] = np.sum((self.target[right] - self.target[right].mean())**2)
+
+#         return splits[to_keep], objective_left[to_keep], objective_right[to_keep]
 
 
 # class RandomTree(L2CoETree):
@@ -737,7 +831,7 @@ PARTITION_CLASSES = {
     "coe": CoE_Tree,
     "pdp-pfi": PDP_PFI_Tree,
     "gadget-pdp" : GADGET_PDP,
-    "cart" : CART,
+    # "cart" : CART,
     # "random" : RandomTree,
 }
 
