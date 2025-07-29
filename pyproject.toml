@@ -22,7 +22,8 @@ dependencies = [
   'shap',
   'xgboost',
   'interpret-core',
-  'omegaconf'
+  'omegaconf',
+  "shapiq>=1.3.1",
 ]
 
 [tool.setuptools]
