@@ -65,11 +65,13 @@ class GlobalRiskGame(Game):
                 true values and the predictions as input and returns the loss.
 
             n_samples_eval: The number of background samples to use for each evaluation of the value
-                function. The number of model evaluations is ``n_samples_eval * n_coalitions``.
-                Defaults to ``10``.
+                function. The number of model evaluations is ``n_samples_eval * n_coalitions``. If
+                ``None`` or greater than the number of samples in the background data, all samples
+                are used. Defaults to ``None``.
 
-            n_samples_empty: The number of samples to use for the empty subset of features. Defaults
-                to ``200``.
+            n_samples_empty: The number of samples to use for the empty subset of features. If
+                ``None`` or greater than the number of samples in the background data, all samples
+                are used. Defaults to ``None``.
 
             normalize: A flag to normalize the game values. If ``True``, then the game values are
                 normalized and centered to be zero for the empty set of features. Defaults to
