@@ -1,4 +1,5 @@
 """Class for minimizing the superset of a functional decomposition using a decision tree."""
+from typing import Dict, List, Tuple
 import numpy as np
 
 from .fd_trees import FDTree
@@ -8,7 +9,12 @@ class MinimizeSuperset(FDTree):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def fit(self, X, decomposition, u):
+    def fit(
+            self,
+            X: np.ndarray,
+            decomposition: Dict[Tuple[int], np.ndarray],
+            U: List[Tuple[int]]
+            ):
         """
         Fit the FDTree
 
@@ -19,56 +25,38 @@ class MinimizeSuperset(FDTree):
             in the Features object passed to the constructor.
         decomposition : dict{Tuple: np.ndarray}
             The functional decomposition used to compute the objective.
-            It needs to be anchored with foreground=background i.e.
-            `decomposition[(0,)].shape = (N, N)`.
-        u : Tuple(int)
-            The subset whose pure-full disagreement is minimized
+            It needs to be anchored with foreground=background i.e.  `decomposition[(0,)].shape = (N, N)`.
+        U : List[Tuple[int]]
+            A subset of the powerset whose sum of pure-vs-full interactions are minimized. For example
+            passing `U=[(0,), (1,), (2,)]` will minimize all interactions involving one of these features.
         """
+        super().fit(X)
 
-        self.X = X
-        self.N, self.D = X.shape
-        self.u = u
-        assert np.shape(decomposition[u]) == (self.N, self.N), "An Anchored decomposition with foreground=background is needed"
-        self.H = decomposition[u]
-        self.loss_factor = 1 / self.H.mean(1).var()
+        self.U = U
+        assert isinstance(U, (list, tuple))
+        assert isinstance(U[0], (list, tuple))
+        assert np.shape(decomposition[U[0]]) == (self.N, self.N), "An Anchored decomposition with foreground=background is needed"
+        self.H = np.stack([decomposition[u] for u in U], axis=-1)  # (N, N, |U|)
+        self.len_u = np.array([len(u) for u in self.U])
+        self.loss_factor = 1 / self.H.mean(1).var(0).mean()
         self.n_regions = 0
-        # Loss function is the difference between full and partial effects
-        loss = np.mean((self.H.mean(0) - (-1)**len(u)*self.H.mean(1))**2)
+        # Loss function is the difference between pure and full  effects
+        loss = self.get_loss(np.arange(self.N)) / self.N
         # Start recursive tree growth
         self.root, self.final_objective, self.n_regions = self._tree_builder(np.arange(self.N), depth=0, loss=loss)
         self.final_loss = self.final_objective - self.alpha * self.n_regions
         return self
 
 
-    def _get_objective_for_splits(self, instances_idx, feature):
+    def get_loss(self, instances_idx: np.ndarray):
         """
-        Given the indices of the datapoints in the current leaf, compute
-        the loss function for a variety of split candidates.
+        For each subset u in U, we report the pure-vs-full interaction disagreements and average them.
         """
-        x_i = self.X[instances_idx, feature]
+        instances_idx = instances_idx[:, np.newaxis]
+        H_subset = self.H[instances_idx, instances_idx.T]
+        loss = np.sum((H_subset.mean(0) - (-1)**self.len_u*H_subset.mean(1))**2)
+        return loss / len(self.U)
 
-        splits = self._get_split_candidates(x_i, feature)
-
-        # No split possible
-        if len(splits) == 0:
-            return [], [], []
-
-        # Otherwise we optimize the objective
-        loss_left = np.zeros(len(splits))
-        loss_right = np.zeros(len(splits))
-        to_keep = np.zeros((len(splits))).astype(bool)
-
-        # Iterate over all splits
-        for i, split in enumerate(splits):
-            left = instances_idx[x_i <= split][:, np.newaxis]
-            right = instances_idx[x_i > split][:, np.newaxis]
-            H_left = self.H[left, left.T]
-            H_right = self.H[right, right.T]
-            to_keep[i] = min(len(left), len(right)) >= self.min_samples_leaf
-            loss_left[i]  = np.sum((H_left.mean(0) - (-1)**len(self.u)*H_left.mean(1))**2)
-            loss_right[i]  = np.sum((H_right.mean(0) - (-1)**len(self.u)*H_right.mean(1))**2)
-
-        return splits[to_keep], loss_left[to_keep], loss_right[to_keep]
 
 
 def get_marginal_conditional_effects(binned_feature, R):
@@ -80,6 +68,7 @@ def get_marginal_conditional_effects(binned_feature, R):
     return marginal_effect, conditional_effect
 
 
+# TODO improve the API of this class
 class PDPvsMPlot(FDTree):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -102,47 +91,25 @@ class PDPvsMPlot(FDTree):
         binned_feature : np.ndarray[int]
             Binned values for feature i, used to compute conditional expectations
         """
+        super().fit(X)
 
-        self.X = X
-        self.N, self.D = X.shape
         assert np.shape(decomposition[(i,)]) == (self.N, self.N), "An Anchored decomposition with foreground=background is needed"
         self.R = decomposition[(i,)] + decomposition[()]
         self.loss_factor = 1 / self.R.var()
         self.binned_data = binned_feature
         self.n_regions = 0
-        marginal_effect, conditional_effect = get_marginal_conditional_effects(binned_feature, self.R)
         # The loss is the difference between the marginal and conditional effects
-        loss = np.mean((marginal_effect - conditional_effect)**2)
+        loss = self.get_loss(np.arange(self.N)) / self.N
         # Start recursive tree growth
         self.root, self.final_objective, self.n_regions = self._tree_builder(np.arange(self.N), depth=0, loss=loss)
         self.final_loss = self.final_objective - self.alpha * self.n_regions
         return self
 
 
-    def _get_objective_for_splits(self, instances_idx, feature):
-        x_i = self.X[instances_idx, feature]
-
-        splits = self._get_split_candidates(x_i, feature)
-
-        # No split possible
-        if len(splits) == 0:
-            return [], [], []
-
-        # Otherwise we optimize the objective
-        loss_left = np.zeros(len(splits))
-        loss_right = np.zeros(len(splits))
-        to_keep = np.zeros((len(splits))).astype(bool)
+    def get_loss(self, instances_idx: np.ndarray):
 
         # Iterate over all splits
-        for i, split in enumerate(splits):
-            left = instances_idx[x_i <= split][:, np.newaxis]
-            right = instances_idx[x_i > split][:, np.newaxis]
-            R_left = self.R[left, left.T]
-            R_right = self.R[right, right.T]
-            to_keep[i] = min(len(left), len(right)) >= self.min_samples_leaf
-            marginal_left, conditional_left = get_marginal_conditional_effects(self.binned_data[left.ravel()], R_left)
-            marginal_right, conditional_right = get_marginal_conditional_effects(self.binned_data[right.ravel()], R_right)
-            loss_left[i]  = np.sum((marginal_left - conditional_left)**2)
-            loss_right[i]  = np.sum((marginal_right - conditional_right)**2)
-
-        return splits[to_keep], loss_left[to_keep], loss_right[to_keep]
+        instances_idx = instances_idx[:, np.newaxis]
+        R = self.R[instances_idx, instances_idx.T]
+        marginal, conditional = get_marginal_conditional_effects(self.binned_data[instances_idx.ravel()], R)
+        return np.sum((marginal - conditional)**2)

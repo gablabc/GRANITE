@@ -7,7 +7,6 @@ from math import ceil
 from warnings import warn
 
 from .decompositions import get_interventional_from_anchored
-from .fd_trees import GADGET_PDP, PDP_PFI_Tree
 
 
 def setup_pyplot_font(size=11, use_latex=False):

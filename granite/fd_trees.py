@@ -46,7 +46,7 @@ class Node(object):
 
 
 class FDTree(ABC):
-    """ Train a binary tree to minimize : LoA + alpha |L| """
+    """ Train a binary tree to minimize : Loss + alpha |L| """
 
     def __init__(
             self,
@@ -72,8 +72,10 @@ class FDTree(ABC):
             allow to try various splits and return a more optimal solution. Note that the training
             scales as `O(branching_per_node^max_depth)`
         alpha : float, default=0.05
-            Objective regularization `LoA + alpha |L|` so splitting nodes increases the loss by
+            Objective regularization `Loss + alpha |L|` so splitting nodes increases the loss by
             `alpha` and reductions in `LoA` must be large enough to compensate.
+        save_losses: bool, default=False
+            Save the loss function for each split value of each internal node. Useful for debugging.
         """
         self.feature_objs = features.feature_objs
         self.max_depth = max_depth
@@ -81,6 +83,10 @@ class FDTree(ABC):
         self.branching_per_node = branching_per_node
         self.alpha = alpha
         self.save_losses = save_losses
+        self.D = len(features)
+        self.loss_factor = 1.0
+        self.root = None
+        self.n_regions = 0
 
 
     def print(
@@ -100,6 +106,8 @@ class FDTree(ABC):
         """
         tree_strings = []
         self.region_idx = 0
+        if self.root is None:
+            raise Exception("Cannot print a tree before calling `.fit`")
         self._recurse_print_tree_str(self.root, verbose=verbose, tree_strings=tree_strings)
         tree_strings.append(f"Final Loss {self.final_loss:.4f}")
         if return_string:
@@ -136,7 +144,7 @@ class FDTree(ABC):
             i: int
             ) -> np.ndarray:
         """ Return a list of split candiates along feature i """
-        breakpoint()
+
         if self.feature_objs[i].type == "num":
             x_i_unique = np.unique(x_i)
             if len(x_i_unique) < 40:
@@ -169,8 +177,10 @@ class FDTree(ABC):
                 splits = []
             else:
                 splits = np.array([0])
+        elif ":" in self.feature_objs[i].type:
+            raise Exception("Cannot group upon features that are grouped")
         else:
-            raise Exception("Nominal features are not yet supported")
+            raise Exception("Only `num`, `sparse_num`, `ordinal`, and `num_int` features can be split")
 
         return splits
 
@@ -183,49 +193,78 @@ class FDTree(ABC):
         """ Compute a heapqueue for splits along each feature """
         heapq = []
         for feature in range(self.D):
-            splits, loss_left, loss_right = self._get_objective_for_splits(instances_idx, feature)
+
+            x_i = self.X[instances_idx, feature]
+            splits = self._get_split_candidates(x_i, feature)
+
+            # No split possible
+            if len(splits) == 0:
+                continue
+
+            # Otherwise we optimize the objective
+            loss_left = np.zeros(len(splits))
+            loss_right = np.zeros(len(splits))
+            to_keep = np.zeros((len(splits))).astype(bool)
+
+            # Iterate over all splits
+            for i, split in enumerate(splits):
+                left = instances_idx[x_i <= split]
+                right = instances_idx[x_i > split]
+                to_keep[i] = min(len(left), len(right)) >= self.min_samples_leaf
+                loss_left[i] = self.get_loss(left)
+                loss_right[i] = self.get_loss(right)
+
+            splits = splits[to_keep]
+            loss_left = loss_left[to_keep]
+            loss_right = loss_right[to_keep]
+
             # No split was conducted
             if len(splits) == 0:
-                pass
-            else:
+                continue
 
-                # Otherwise search for the best split
-                objective = loss_right + loss_left
-                if self.save_losses:
-                    curr_node.splits.append(splits)
-                    curr_node.objectives.append(objective/len(instances_idx))
+            # Otherwise search for the best split
+            loss = loss_right + loss_left
+            if self.save_losses:
+                curr_node.splits.append(splits)
+                curr_node.objectives.append(self.loss_factor * loss / self.N)
 
-                best_split_idx = np.argmin(objective)
-                # The heap contains (obj, feature, split_value, obj_left, obj_right)
-                heappush(heapq, (objective[best_split_idx], feature, splits[best_split_idx],
-                                loss_left[best_split_idx] / self.N, loss_right[best_split_idx] / self.N))
+            best_split_idx = np.argmin(loss)
+            # The heap contains (obj, feature, split_value, obj_left, obj_right)
+            heappush(heapq, (loss[best_split_idx], feature, splits[best_split_idx],
+                            loss_left[best_split_idx] / self.N, loss_right[best_split_idx] / self.N))
 
         return heapq
 
 
     @abstractmethod
-    def _get_objective_for_splits(
+    def get_loss(
             self,
-            instances_idx,
-            feature
-            ):
+            instances_idx: np.ndarray,
+            ) -> float:
         """
-        Get the objective value at each split.
+        Get the loss function given a subset of data
 
         Parameters
         ----------
         instances_idx : np.ndarray
-            Array of intergers representing the index of the instances at the node.
-        feature : int
-            The index of the feature being split.
+            `(N,)` array of integers representing the index of the instances at the node.
         """
         pass
 
 
     @abstractmethod
     def fit(self, X, **kwargs):
-        """ Abstract Method to Implement """
-        pass
+        """
+        Fit the FDTree using foreground data and possibly other parameters.
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Array of shape (N, d) of features values to split upon.
+        """
+        self.X = X
+        self.N, D = X.shape
+        assert D == self.D, "Array passed to `.fit` must have one column per feature passed to the constructor"
 
 
     def _tree_builder(
@@ -234,10 +273,31 @@ class FDTree(ABC):
             depth: int,
             loss: float
             ) -> Tuple[Node, float, int]:
+        """ Recursive calls to build the tree
+
+        Parameters
+        ----------
+        instances_idx : np.ndarray
+            `(N,)` array of integers representing the index of the instances at the node.
+        depth: int
+            The current depth in the tree traversal.
+        loss: float
+            The loss contribution of the current node.
+
+        Returns
+        -------
+        curr_node: Node
+            The current node.
+        objective: float
+            The objective contribution of the current node i.e. Loss + alpha * n_children
+        n_children_leaves: int
+            Number of child leaves. If terminal node then return 1.
+        """
+
         # Create a node
         curr_node = Node(instances_idx, depth, loss*self.loss_factor)
 
-        # Subobjective at that node
+        # Loss at that node
         node_loss = loss * self.loss_factor
 
         # Stop the tree growth if the maximum depth is attained,
@@ -303,7 +363,7 @@ class FDTree(ABC):
 
         Parameters
         ----------
-        X_new : (N, n_features) np.ndarray
+        X_new : (N, d) np.ndarray
             The data to assign to each lead (region) of the FDTree. The ith column of `X_new` must be the
             ith feature in the Features object passed to the constructor.
 
@@ -312,6 +372,8 @@ class FDTree(ABC):
         regions : (N,) np.ndarray
             The region index of each datum.
         """
+        if self.root is None:
+            raise Exception("Cannot predict before calling `.fit`")
         regions = np.zeros(X_new.shape[0], dtype=np.int32)
         self.region_idx = 0
         if self.n_regions == 1:
@@ -352,6 +414,10 @@ class FDTree(ABC):
             use_latex:bool=False
             ) -> Dict[int, str]:
         """ Return the rule for each leaf """
+
+        if self.root is None:
+            raise Exception("Cannot compute rules before calling `.fit`")
+
         self.region_idx  = 0
         if self.n_regions == 1:
             return "all"
@@ -490,7 +556,6 @@ class FDTree(ABC):
 
 
 
-
     def _postprocess_categorical_rules(
             self,
             curr_rule: List[str],
@@ -550,9 +615,8 @@ class CoE_Tree(FDTree):
             It needs to be anchored with foreground=background i.e.
             `decomposition[(0,)].shape = (N, N)`.
         """
+        super().fit(X)
 
-        self.X = X
-        self.N, self.D = X.shape
         assert np.shape(decomposition[(0,)]) == (self.N, self.N), "An Anchored decomposition with foreground=background is needed"
         self.H_add = get_h_add(decomposition)
         self.h = decomposition[()]
@@ -560,180 +624,159 @@ class CoE_Tree(FDTree):
         self.n_regions = 0
         loss = np.mean((self.h - self.H_add.mean(1))**2)
         # Start recursive tree growth
-        self.root, self.final_objective, self.n_regions = \
-                self._tree_builder(np.arange(self.N), depth=0, loss=loss)
+        self.root, self.final_objective, self.n_regions = self._tree_builder(np.arange(self.N), depth=0, loss=loss)
         self.final_loss = self.final_objective - self.alpha * self.n_regions
         return self
 
 
-    def _get_objective_for_splits(self, instances_idx, feature):
-        x_i = self.X[instances_idx, feature]
-
-        splits = self._get_split_candidates(x_i, feature)
-
-        # No split possible
-        if len(splits) == 0:
-            return [], [], []
-
-        # Otherwise we optimize the objective
-        loss_left = np.zeros(len(splits))
-        loss_right = np.zeros(len(splits))
-        to_keep = np.zeros((len(splits))).astype(bool)
-
+    def get_loss(self, instances_idx):
         h = self.h[instances_idx]
-        # Iterate over all splits
-        for i, split in enumerate(splits):
-            left = instances_idx[x_i <= split].reshape((-1, 1))
-            right = instances_idx[x_i > split].reshape((-1, 1))
-            to_keep[i] = min(len(left), len(right)) >= self.min_samples_leaf
-            loss_left[i]  = np.sum((h[x_i <= split] - self.H_add[left, left.T].mean(-1))**2)
-            loss_right[i] = np.sum((h[x_i > split]  - self.H_add[right, right.T].mean(-1))**2)
-
-        return splits[to_keep], loss_left[to_keep], loss_right[to_keep]
+        instances_idx = instances_idx[:, np.newaxis]
+        return np.sum((h - self.H_add[instances_idx, instances_idx.T].mean(-1))**2)
 
 
 
-class PDP_PFI_Tree(FDTree):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+# class PDP_PFI_Tree(FDTree):
+#     def __init__(self, *args, **kwargs):
+#         super().__init__(*args, **kwargs)
 
 
-    def fit(self, X, decomposition):
-        """
-        Fit the PDP_PFI_Tree
+#     def fit(self, X, decomposition):
+#         """
+#         Fit the PDP_PFI_Tree
 
-        Parameters
-        ----------
-        X : (N, n_features) np.ndarray
-            The data on which to fit the tree. The ith column of `X` must be the ith feature
-            in the Features object passed to the constructor.
-        decomposition : dict{Tuple: np.ndarray}
-            The functional decomposition used to compute the CoE objective.
-            It needs to be anchored with foreground=background i.e.
-            `decomposition[(0,)].shape = (N, N)`.
-        """
-        self.X = X
-        self.N, self.D = X.shape
-        self.h = decomposition[()]
-        keys = decomposition.keys()
-        additive_keys = [key for key in keys if len(key)==1]
-        assert np.shape(decomposition[additive_keys[0]]) == (self.N, self.N), "An Anchored decomposition with foreground=background is needed"
-        self.H = np.zeros((self.N, self.N, len(additive_keys)))
-        # Additive terms
-        for i, key in enumerate(additive_keys):
-            self.H[..., i] = decomposition[key]
+#         Parameters
+#         ----------
+#         X : (N, n_features) np.ndarray
+#             The data on which to fit the tree. The ith column of `X` must be the ith feature
+#             in the Features object passed to the constructor.
+#         decomposition : dict{Tuple: np.ndarray}
+#             The functional decomposition used to compute the CoE objective.
+#             It needs to be anchored with foreground=background i.e.
+#             `decomposition[(0,)].shape = (N, N)`.
+#         """
+#         self.X = X
+#         self.N, self.D = X.shape
+#         self.h = decomposition[()]
+#         keys = decomposition.keys()
+#         additive_keys = [key for key in keys if len(key)==1]
+#         assert np.shape(decomposition[additive_keys[0]]) == (self.N, self.N), "An Anchored decomposition with foreground=background is needed"
+#         self.H = np.zeros((self.N, self.N, len(additive_keys)))
+#         # Additive terms
+#         for i, key in enumerate(additive_keys):
+#             self.H[..., i] = decomposition[key]
 
-        self.loss_factor = 1 / self.h.var() # To have an loss 0-100%
-        loss = np.mean(np.sum((self.H.mean(0) + self.H.mean(1))**2, axis=-1))
-        # Start recursive tree growth
-        self.root, self.final_objective, self.n_regions = \
-                self._tree_builder(np.arange(self.N), depth=0, loss=loss)
-        self.final_loss = self.final_objective - self.alpha * self.n_regions
-        return self
+#         self.loss_factor = 1 / self.h.var() # To have an loss 0-100%
+#         loss = np.mean(np.sum((self.H.mean(0) + self.H.mean(1))**2, axis=-1))
+#         # Start recursive tree growth
+#         self.root, self.final_objective, self.n_regions = \
+#                 self._tree_builder(np.arange(self.N), depth=0, loss=loss)
+#         self.final_loss = self.final_objective - self.alpha * self.n_regions
+#         return self
 
 
-    def _get_objective_for_splits(self, instances_idx, feature):
-        x_i = self.X[instances_idx, feature]
+#     def _get_objective_for_splits(self, instances_idx, feature):
+#         x_i = self.X[instances_idx, feature]
 
-        splits = self._get_split_candidates(x_i, feature)
+#         splits = self._get_split_candidates(x_i, feature)
 
-        # No split possible
-        if len(splits) == 0:
-            return [], [], []
+#         # No split possible
+#         if len(splits) == 0:
+#             return [], [], []
 
-        # Otherwise we optimize the objective
-        loss_left = np.zeros(len(splits))
-        loss_right = np.zeros(len(splits))
-        to_keep = np.zeros((len(splits))).astype(bool)
+#         # Otherwise we optimize the objective
+#         loss_left = np.zeros(len(splits))
+#         loss_right = np.zeros(len(splits))
+#         to_keep = np.zeros((len(splits))).astype(bool)
 
-        # Iterate over all splits
-        for i, split in enumerate(splits):
-            left = instances_idx[x_i <= split].reshape((-1, 1))
-            right = instances_idx[x_i > split].reshape((-1, 1))
-            to_keep[i] = min(len(left), len(right)) >= self.min_samples_leaf
-            H_left = self.H[left, left.T]
-            H_right = self.H[right, right.T]
-            loss_left[i] = np.sum((H_left.mean(0) + H_left.mean(1))**2)
-            loss_right[i] = np.sum((H_right.mean(0) + H_right.mean(1))**2)
+#         # Iterate over all splits
+#         for i, split in enumerate(splits):
+#             left = instances_idx[x_i <= split].reshape((-1, 1))
+#             right = instances_idx[x_i > split].reshape((-1, 1))
+#             to_keep[i] = min(len(left), len(right)) >= self.min_samples_leaf
+#             H_left = self.H[left, left.T]
+#             H_right = self.H[right, right.T]
+#             loss_left[i] = np.sum((H_left.mean(0) + H_left.mean(1))**2)
+#             loss_right[i] = np.sum((H_right.mean(0) + H_right.mean(1))**2)
 
-        return splits[to_keep], loss_left[to_keep], loss_right[to_keep]
+#         return splits[to_keep], loss_left[to_keep], loss_right[to_keep]
 
 
 
 
 
-class GADGET_PDP(FDTree):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+# class GADGET_PDP(FDTree):
+#     def __init__(self, *args, **kwargs):
+#         super().__init__(*args, **kwargs)
 
-    def fit(self, X, decomposition):
-        """
-        Fit GADGET_PDP
+#     def fit(self, X, decomposition):
+#         """
+#         Fit GADGET_PDP
 
-        Parameters
-        ----------
-        X : (N, n_features) np.ndarray
-            The data on which to fit the tree. The ith column of `X` must be the ith feature
-            in the Features object passed to the constructor.
-        decomposition : dict{Tuple: np.ndarray}
-            The functional decomposition used to compute the CoE objective.
-            It needs to be anchored with foreground=background i.e.
-            `decomposition[(0,)].shape = (N, N)`.
-        """
-        self.X = X
-        self.N, self.D = X.shape
-        self.h = decomposition[()]
-        keys = decomposition.keys()
-        additive_keys = [key for key in keys if len(key)==1]
-        assert np.shape(decomposition[additive_keys[0]]) == (self.N, self.N), "An Anchored decomposition with foreground=background is needed"
-        self.R = np.zeros((self.N, self.N, len(additive_keys)))
-        # Additive terms
-        for i, key in enumerate(additive_keys):
-            self.R[..., i] = decomposition[key] + self.h
+#         Parameters
+#         ----------
+#         X : (N, n_features) np.ndarray
+#             The data on which to fit the tree. The ith column of `X` must be the ith feature
+#             in the Features object passed to the constructor.
+#         decomposition : dict{Tuple: np.ndarray}
+#             The functional decomposition used to compute the CoE objective.
+#             It needs to be anchored with foreground=background i.e.
+#             `decomposition[(0,)].shape = (N, N)`.
+#         """
+#         self.X = X
+#         self.N, self.D = X.shape
+#         self.h = decomposition[()]
+#         keys = decomposition.keys()
+#         additive_keys = [key for key in keys if len(key)==1]
+#         assert np.shape(decomposition[additive_keys[0]]) == (self.N, self.N), "An Anchored decomposition with foreground=background is needed"
+#         self.R = np.zeros((self.N, self.N, len(additive_keys)))
+#         # Additive terms
+#         for i, key in enumerate(additive_keys):
+#             self.R[..., i] = decomposition[key] + self.h
 
-        self.loss_factor = 1 / self.h.var() # To have an loss 0-100%
-        loss = np.mean(np.sum((self.R - self.R.mean(axis=0, keepdims=True) -
-                                self.R.mean(axis=1, keepdims=True) +
-                                self.R.mean(axis=0, keepdims=True).mean(axis=1, keepdims=True))**2,
-                                axis=-1))
-        # Start recursive tree growth
-        self.root, self.final_objective, self.n_regions = \
-                self._tree_builder(np.arange(self.N), depth=0, loss=loss)
-        self.final_loss = self.final_objective - self.alpha * self.n_regions
-        return self
+#         self.loss_factor = 1 / self.h.var() # To have an loss 0-100%
+#         loss = np.mean(np.sum((self.R - self.R.mean(axis=0, keepdims=True) -
+#                                 self.R.mean(axis=1, keepdims=True) +
+#                                 self.R.mean(axis=0, keepdims=True).mean(axis=1, keepdims=True))**2,
+#                                 axis=-1))
+#         # Start recursive tree growth
+#         self.root, self.final_objective, self.n_regions = \
+#                 self._tree_builder(np.arange(self.N), depth=0, loss=loss)
+#         self.final_loss = self.final_objective - self.alpha * self.n_regions
+#         return self
 
 
-    def _get_objective_for_splits(self, instances_idx, feature):
-        x_i = self.X[instances_idx, feature]
+#     def _get_objective_for_splits(self, instances_idx, feature):
+#         x_i = self.X[instances_idx, feature]
 
-        splits = self._get_split_candidates(x_i, feature)
+#         splits = self._get_split_candidates(x_i, feature)
 
-        # No split possible
-        if len(splits) == 0:
-            return [], [], []
+#         # No split possible
+#         if len(splits) == 0:
+#             return [], [], []
 
-        # Otherwise we optimize the objective
-        loss_left = np.zeros(len(splits))
-        loss_right = np.zeros(len(splits))
-        to_keep = np.zeros((len(splits))).astype(bool)
+#         # Otherwise we optimize the objective
+#         loss_left = np.zeros(len(splits))
+#         loss_right = np.zeros(len(splits))
+#         to_keep = np.zeros((len(splits))).astype(bool)
 
-        # Iterate over all splits
-        for i, split in enumerate(splits):
-            left = instances_idx[x_i <= split].reshape((-1, 1))
-            right = instances_idx[x_i > split].reshape((-1, 1))
-            to_keep[i] = min(len(left), len(right)) >= self.min_samples_leaf
-            R_left = self.R[left, left.T]
-            R_right = self.R[right, right.T]
-            errors_left = (R_left - R_left.mean(axis=0, keepdims=True) -
-                            R_left.mean(axis=1, keepdims=True) +
-                            R_left.mean(axis=0, keepdims=True).mean(axis=1, keepdims=True))**2
-            loss_left[i] = errors_left.sum(-1).mean(-1).sum()
-            errors_right = (R_right - R_right.mean(axis=0, keepdims=True) -
-                            R_right.mean(axis=1, keepdims=True) +
-                            R_right.mean(axis=0, keepdims=True).mean(axis=1, keepdims=True))**2
-            loss_right[i] = errors_right.sum(-1).mean(-1).sum()
+#         # Iterate over all splits
+#         for i, split in enumerate(splits):
+#             left = instances_idx[x_i <= split].reshape((-1, 1))
+#             right = instances_idx[x_i > split].reshape((-1, 1))
+#             to_keep[i] = min(len(left), len(right)) >= self.min_samples_leaf
+#             R_left = self.R[left, left.T]
+#             R_right = self.R[right, right.T]
+#             errors_left = (R_left - R_left.mean(axis=0, keepdims=True) -
+#                             R_left.mean(axis=1, keepdims=True) +
+#                             R_left.mean(axis=0, keepdims=True).mean(axis=1, keepdims=True))**2
+#             loss_left[i] = errors_left.sum(-1).mean(-1).sum()
+#             errors_right = (R_right - R_right.mean(axis=0, keepdims=True) -
+#                             R_right.mean(axis=1, keepdims=True) +
+#                             R_right.mean(axis=0, keepdims=True).mean(axis=1, keepdims=True))**2
+#             loss_right[i] = errors_right.sum(-1).mean(-1).sum()
 
-        return splits[to_keep], loss_left[to_keep], loss_right[to_keep]
+#         return splits[to_keep], loss_left[to_keep], loss_right[to_keep]
 
 
 
@@ -829,8 +872,8 @@ class GADGET_PDP(FDTree):
 
 PARTITION_CLASSES = {
     "coe": CoE_Tree,
-    "pdp-pfi": PDP_PFI_Tree,
-    "gadget-pdp" : GADGET_PDP,
+    # "pdp-pfi": PDP_PFI_Tree,
+    # "gadget-pdp" : GADGET_PDP,
     # "cart" : CART,
     # "random" : RandomTree,
 }
