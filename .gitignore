@@ -2,5 +2,8 @@ granite.egg-info
 *.pyc
 *.so
 *.sh
+*.png
 *joblib
 granite/cached_data/
+datasets/
+tutorials/

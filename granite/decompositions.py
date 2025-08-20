@@ -199,7 +199,7 @@ def _get_anchored_components_u(decomposition, h, key, Imap_inv, x_idxs, foregrou
             result[i, not_annihilated] += h_replace
             # Remove all contributions of subsets to get the interaction
             for subset in powerset(key):
-                if subset not in decomposition:
+                if subset not in decomposition.keys():
                     raise Exception("The provided interaction set is not closed downward")
                 if len(subset) > 0:
                     result[i, not_annihilated] -= decomposition[subset][x_idx, not_annihilated]
