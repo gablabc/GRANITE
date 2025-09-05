@@ -198,6 +198,7 @@ class PDPvsMPlot(FDTree):
             assert len(u) == 1, f"PDPvsMPlot only suppports main effects. Not {len(u)}-way interactions."
             self.R.append(decomposition[u] + decomposition[()])
             self.loss_factor += self.R[-1].var()
+        assert len(U) == len(binned_features), "A binned_features must be provided for each features in U."
         self.loss_factor = 1 / self.loss_factor
         self.binned_features = binned_features
         self.n_regions = 0
