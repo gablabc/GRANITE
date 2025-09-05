@@ -4,6 +4,7 @@ import pandas as pd
 from tqdm import tqdm
 from copy import deepcopy
 from itertools import chain, combinations
+from typing import Tuple
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, KBinsDiscretizer, FunctionTransformer
 from sklearn.preprocessing import OneHotEncoder, SplineTransformer, QuantileTransformer
@@ -442,3 +443,49 @@ def get_quantiles(x_i, bins):
     )
     bins = len(quantiles) - 1
     return quantiles, bins
+
+
+
+
+def decomposition_to_R(decomposition: dict[Tuple[int], np.ndarray]) -> dict[Tuple[int], np.ndarray]:
+    """ Apply a Mobieus inverse from the H matrices to the R matrices """
+    R = {}
+    for u in decomposition.keys():
+        R[u] = decomposition[u]
+        for v in powerset(u):
+            if v not in decomposition.keys():
+                raise Exception("The provided decomposition is not closed downward")
+            if len(v) > 0:
+                R[u] += decomposition[v]
+    return R
+
+
+# Loss functions used for the local-loss evaluation game
+
+def pointwise_squared_loss(y_hat: np.ndarray, y:np.ndarray) -> np.ndarray:
+    """
+    Compute the point wise squared loss
+
+    Parameters
+    ----------
+    y_hat:
+        Can be a (N,) or (N, n_pred) array storing one (or several) prediction per data point.
+    y:
+        (N,) array of label for each datapoint.
+
+    Returns
+    -------
+    pointwise_loss:
+        A (N, 1) or (N, n_pred) array of the loss evaluated on each prediction on each datapoint.
+        The case with y_hat of shape (N,) add a new dimension to the output to be consistent with
+        the case where y_hat has shape (N, n_pred).
+    """
+    assert isinstance(y_hat, np.ndarray)
+    assert isinstance(y, np.ndarray)
+    assert y.ndim == 1, "The labels must stored in a 1-dimensional array"
+    if y_hat.ndim == 1:
+        return (y_hat[:, np.newaxis] - y[:, np.newaxis]) ** 2
+    elif y_hat.ndim == 2:
+        return (y_hat - y[:, np.newaxis])**2
+    else:
+        raise Exception("y_hat must be one or two dimensional")
