@@ -1,6 +1,7 @@
 import sys
 import numpy as np
 import pandas as pd
+from matplotlib import pyplot as plt
 from tqdm import tqdm
 from copy import deepcopy
 from itertools import chain, combinations
@@ -489,3 +490,98 @@ def pointwise_squared_loss(y_hat: np.ndarray, y:np.ndarray) -> np.ndarray:
         return (y_hat - y[:, np.newaxis])**2
     else:
         raise Exception("y_hat must be one or two dimensional")
+
+
+
+def create_bins_for_data(
+    x: np.ndarray,
+    cat_feature_indices: list[int],
+    n_bins_numerical: int,
+) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    """Create bins and mappings for each feature in the dataset.
+
+    Categorial features are not binned and all their unique values are used as bins. Numerical features are binned using quantiles according to the `n_bins_numerical` parameter.
+
+    The dataset is then binned according to these bins, and the indices of the feature values in their respective bins are returned.
+
+    Args:
+        x (np.ndarray): The input data of shape (N, d).
+        cat_feature_indices (list[int]): List of indices of categorical features.
+        n_bins_numerical (int): Number of bins to use for numerical features.
+
+    Returns:
+        tuple[list[np.ndarray], list[np.ndarray]]:
+            - A list where each element is an array of bin edges for the corresponding feature.
+            - A list for each feature where the feature values are binned.
+    """
+    N, d = x.shape
+    bins = []
+    for i in range(d):
+        if i in cat_feature_indices:
+            # Categorical feature: use unique values as bins
+            unique_values = np.unique(x[:, i])
+            bins.append(np.sort(unique_values))
+        else:
+            # Numerical feature: use quantiles to create bins
+            quantiles = np.percentile(x[:, i], q=[j * 100 / n_bins_numerical for j in range(n_bins_numerical + 1)], axis=0)
+            bins.append(quantiles)
+    # Now bin the data
+    binned_indices = [np.zeros_like(x[:, i], dtype=int) for i in range(d)]
+    for i in range(d):
+        binned_indices[i] = np.clip(np.digitize(x[:, i], bins=bins[i]) - 1, a_min=0, a_max=len(bins[i]) - 2)
+    return bins, binned_indices
+
+
+def create_bins_for_data_partition_tree(
+    x: np.ndarray,
+    cat_feature_indices: list[int],
+    max_leaf_nodes: int,
+    show_trees: bool = False,
+) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    """Create bins and mappings for each feature in the dataset using a partition tree approach.
+
+    This function is similar to `create_bins_for_data` but it uses sklearn decision trees to create
+    bins that better capture the distribution of the data:
+        - For each feature, a decision tree is trained to predict the feature values using the other
+            features.
+        - Each leaf of the decision tree defines a bin.
+        - The bin maps each data point to the leaf it falls into as the binned indices.
+
+    For categorical features, a decision tree classifier is used, while for numerical features, a
+    decision tree regressor is used.
+
+    Args:
+        x (np.ndarray): The input data of shape (N, d).
+        cat_feature_indices (list[int]): List of indices of categorical features.
+        max_leaf_nodes (int): Maximum number of leaf nodes (bins) for the decision trees.
+        show_trees (bool): Whether to plot the decision tree for each feature.
+
+    Returns:
+        tuple[list[np.ndarray], list[np.ndarray]]:
+            - A list where each element is an array of bin edges for the corresponding feature.
+            - A list for each feature where the feature values are binned.
+    """
+    from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+    from sklearn import tree
+
+    N, d = x.shape
+    bins = []
+    binned_indices = []
+    for i in range(d):
+        X_other = np.delete(x, i, axis=1)
+        y_feature = x[:, i]
+        if i in cat_feature_indices:
+            # Categorical feature: use a decision tree classifier to create bins
+            dt = DecisionTreeClassifier(max_leaf_nodes=max_leaf_nodes, criterion='entropy')
+        else:
+            dt = DecisionTreeRegressor(max_leaf_nodes=max_leaf_nodes, criterion='squared_error')
+        dt.fit(X_other, y_feature)
+        if show_trees:
+            plt.figure(figsize=(12, 8))
+            tree.plot_tree(dt)
+            plt.show()
+        leaf_indices = dt.apply(X_other)
+        unique_leaves = np.unique(leaf_indices)
+        bins.append(unique_leaves)
+        binned_indices.append(np.array([np.where(unique_leaves == leaf)[0][0] for leaf in leaf_indices]))
+    return bins, binned_indices

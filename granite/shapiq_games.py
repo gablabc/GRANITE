@@ -43,10 +43,12 @@ class GlobalRiskGame(Game):
         self,
         *,
         data: np.ndarray,
+        y_true: np.ndarray,
         model: Callable[[np.ndarray], np.ndarray],
         loss_function: Callable[[np.ndarray, np.ndarray], float],
         n_samples_eval: int | None = None,
         n_samples_empty: int | None = None,
+        sampling_rounds: int = 1,
         normalize: bool = True,
         random_state: int | None = 42,
         verbose: bool = False,
@@ -83,30 +85,32 @@ class GlobalRiskGame(Game):
         """
         self._rng = np.random.default_rng(random_state)
 
+        # store a copy of the data and y_true
         self.data = copy.deepcopy(data)
-        # shuffle the data column wise (shuffle each column independently)
-        self.data_shuffled = copy.deepcopy(self.data)
-        for i in range(self.data_shuffled.shape[1]):
-            self._rng.shuffle(self.data_shuffled[:, i])
+        self.y_true = copy.deepcopy(y_true)
+
+        # shuffle the data not column wise:
+        shuffled_idx = self._rng.permutation(self.data.shape[0])
+        self.data_shuffled = self.data[shuffled_idx]
+        self.sampling_rounds = sampling_rounds
 
         # specify the number of samples to evaluate for the coalitions
         if n_samples_eval is None:
             n_samples_eval = self.data_shuffled.shape[0]
         self.n_samples_eval = min(n_samples_eval, self.data_shuffled.shape[0])
 
-        # get the model, loss function, and predictions
+        # get the model, loss function, and y_true
         self.model = model
         self.loss_function = loss_function
-        self.predictions = self.model(self.data)
 
         # get empty prediction
         if n_samples_empty is None:
             n_samples_empty = self.data_shuffled.shape[0]
         n_samples_empty = min(n_samples_empty, self.data_shuffled.shape[0])
         idx = self._rng.choice(self.data_shuffled.shape[0], size=n_samples_empty, replace=False)
-        empty_subset, predictions = self.data_shuffled[idx], self.predictions[idx]
+        empty_subset = self.data_shuffled[idx]
         empty_predictions = self.model(empty_subset)  # model call
-        self.empty_loss: float = self.loss_function(predictions, empty_predictions)
+        self.empty_loss: float = self.loss_function(y_true, empty_predictions)
 
         # init the base game
         super().__init__(
@@ -132,16 +136,19 @@ class GlobalRiskGame(Game):
         """
         worth = np.zeros(coalitions.shape[0], dtype=float)
         for i, coalition in enumerate(coalitions):
+            worth_coal = 0.0
             if not any(coalition):
                 worth[i] = self.empty_loss
                 continue
             # get the subset of the data
-            idx = self._rng.choice(self.data.shape[0], size=self.n_samples_eval, replace=False)
-            subset, predictions = self.data[idx].copy(), self.predictions[idx]
-            # replace the features not part of the subset
-            subset[:, ~coalition] = self.data_shuffled[idx][:, ~coalition]
-            # get the predictions of the model on the subset
-            subset_predictions = self.model(subset)
-            # get the loss of the model on the subset
-            worth[i] = self.loss_function(predictions, subset_predictions)
+            for _ in range(self.sampling_rounds):
+                idx = self._rng.choice(self.data.shape[0], size=self.n_samples_eval, replace=False)
+                row_subset, y_true = self.data[idx].copy(), self.y_true[idx]
+                # replace the features not part of the subset
+                row_subset[:, ~coalition] = self.data_shuffled[idx][:, ~coalition]
+                # get the predictions of the model on the subset
+                subset_predictions = self.model(row_subset)
+                # get the loss of the model on the subset
+                worth_coal += self.loss_function(y_true, subset_predictions)
+            worth[i] = worth_coal / self.sampling_rounds
         return worth
