@@ -180,3 +180,102 @@ def get_marginal_vs_conditional_pure_loss_fn(
             loss += np.sum((marginal - conditional)**2)
         return loss
     return loss_fn
+
+
+
+def get_closed_total_sobol(H: np.ndarray):
+    closed_sobol = H.mean(1).var(0)
+    total_sobol = H.var(0).mean(0)
+    return closed_sobol, total_sobol
+
+
+
+def get_marginal_pure_vs_full_variance_loss_fn(
+            decomposition: Dict[Tuple[int], np.ndarray],
+            U: List[Tuple[int]],
+            ):
+    """
+    Return the loss function that computes the error between Closed Sobol and Total Sobol.
+
+    Parameters
+    ----------
+    decomposition : Dict[Tuple[int], np.ndarray]
+        The functional decomposition used to compute the objective.
+        It needs to be anchored with foreground=background i.e.
+        `decomposition[(0,)].shape = (N, N)`.
+    U : List[Tuple[int]]
+        A subset of the powerset whose sum of pure-vs-full interactions are minimized. For example
+        passing `U=[(0,), (1,), (2,)]` will minimize all marginal-vs-conditional effects of these features.
+    """
+
+    check_loss_args(decomposition, U)
+    H = []
+    for u in U:
+        assert len(u) == 1, f"Sobol-vs-TotalSobol only suppports main effects. Not {len(u)}-way interactions."
+        H.append(decomposition[u])
+    H = np.stack(H, axis=-1)
+
+    def loss_fn(instances_idx: np.ndarray[int]):
+        # Iterate over all splits
+        instances_idx = instances_idx[:, np.newaxis]
+        H_subset = H[instances_idx, instances_idx.T]
+        closed_sobol, total_sobol = get_closed_total_sobol(H_subset)
+        loss = np.sum((closed_sobol - total_sobol)**2)
+        return loss
+    return loss_fn
+
+
+
+def get_marginal_conditional_sobol(binned_feature, R):
+    n_instances = len(binned_feature)
+    marginal_sobol = R.var(0).mean()
+    conditional_sobol = 0.0
+    for b in np.unique(binned_feature):
+        inside_bin = np.where(binned_feature == b)[0][:, np.newaxis]
+        ratio = len(inside_bin) / n_instances
+        conditional_sobol += ratio * R[inside_bin, inside_bin.T].var(0).mean()
+    return marginal_sobol, conditional_sobol
+
+
+
+def get_marginal_vs_condition_full_variance_loss_fn(
+            decomposition: Dict[Tuple[int], np.ndarray],
+            U: List[Tuple[int]],
+            binned_features: List[np.ndarray[int]]
+            ):
+    """
+    Return the loss function that computes the error between Marginal and Conditional Sobol
+
+    Parameters
+    ----------
+    decomposition : Dict[Tuple[int], np.ndarray]
+        The functional decomposition used to compute the objective.
+        It needs to be anchored with foreground=background i.e.
+        `decomposition[(0,)].shape = (N, N)`.
+    U : List[Tuple[int]]
+        A subset of the powerset whose sum of pure-vs-full interactions are minimized. For example
+        passing `U=[(0,), (1,), (2,)]` will minimize all marginal-vs-conditional effects of these features.
+    binned_features : List[np.ndarray[int]]
+        The ith element is an array of shape (N,) that stores the binned value of feature i.
+        Used to compute conditional expectations.
+    """
+
+    check_loss_args(decomposition, U)
+    R_matrices = []
+    for u in U:
+        assert len(u) == 1, f"Marginal-vs-Conditional Sobol only suppports main effects. Not {len(u)}-way interactions."
+        R_matrices.append(decomposition[u] + decomposition[()])
+    assert len(U) == len(binned_features), "A binned_features must be provided for each features in U."
+    local_binned_features = binned_features
+
+    def loss_fn(instances_idx: np.ndarray[int]):
+        # Iterate over all splits
+        instances_idx = instances_idx[:, np.newaxis]
+        loss = 0
+        for R, binned_feature in zip(R_matrices, local_binned_features):
+            R_subset = R[instances_idx, instances_idx.T]
+            binned_feature_subset = binned_feature[instances_idx.ravel()]
+            marginal, conditional = get_marginal_conditional_sobol(binned_feature_subset, R_subset)
+            loss += np.sum((marginal - conditional)**2)
+        return loss
+    return loss_fn
