@@ -1,16 +1,24 @@
 """Class for minimizing the superset of a functional decomposition using a decision tree."""
-from typing import Dict, List, Tuple, Callable
+from typing import Dict, List, Tuple, Callable, Optional
 import numpy as np
 
 from .utils import decomposition_to_R
 
 
-def check_loss_args(decomposition, U):
+# marginal_pure_vs_full -> difference between pure and full interactions in a FD
+# marginal_pure_vs_full_loss -> difference between pure nu(i) - nu(empty) and full nu(D) - nu(-i) loss (SAGE)
+# marginal_pure_vs_full_variance -> difference between the marginal pure and full Sobol indices
+
+def check_loss_args(decomposition, U, binned_features: Optional[list[np.ndarray]]=None):
     U = U
     assert isinstance(U, (list, tuple))
     assert isinstance(U[0], (list, tuple))
-    N_1, N_2 =  np.shape(decomposition[U[0]])
-    assert N_1 == N_2, "An Anchored decomposition with foreground=background is needed"
+    for i, u in enumerate(U):
+        N_1, N_2 =  np.shape(decomposition[u])
+        assert N_1 == N_2, "An Anchored decomposition with foreground=background is needed"
+        if binned_features is not None:
+            assert N_1 == len(binned_features[i])
+
 
 
 def get_marginal_pure_vs_full_loss_fn(
@@ -42,144 +50,55 @@ def get_marginal_pure_vs_full_loss_fn(
 
 
 
-
-# def get_pure_full_risk_effects(R, preds, y, loss_func):
-#     # nu(S) = loss_func( E[f(x_s, X_{-S}] - y )
-#     N = len(preds)
-#     # nu(i) - nu(empty)
-#     pure_effect = loss_func(R.mean(1), y) - loss_func(preds.mean()*np.ones(N), y)
-#     # nu(D) - nu(-i)
-#     full_effect = loss_func(preds, y) - loss_func(R.mean(0), y)
-#     return pure_effect, full_effect
-
-
-
-# class MinimizeLossGameSuperset(FDTree):
-#     def __init__(self, *args, **kwargs):
-#         super().__init__(*args, **kwargs)
-
-#     def fit(
-#             self,
-#             X: np.ndarray,
-#             y: np.ndarray,
-#             decomposition: Dict[Tuple[int], np.ndarray],
-#             U: List[Tuple[int]],
-#             loss_func: Callable[[np.ndarray], np.ndarray]
-#             ):
-#         """
-#         Fit the FDTree
-
-#         Parameters
-#         ----------
-#         X : (N, n_features) np.ndarray
-#             The data on which to fit the tree. The ith column of `X` must be the ith feature
-#             in the Features object passed to the constructor.
-#         y : (N,) np.ndarray
-#             The label associated with each datapoint.
-#         decomposition : dict{Tuple: np.ndarray}
-#             The functional decomposition used to compute the objective.
-#             It needs to be anchored with foreground=background i.e.  `decomposition[(0,)].shape = (N, N)`.
-#         U : List[Tuple[int]]
-#             A subset of the powerset whose sum of pure-vs-full interactions are minimized. For example
-#             passing `U=[(0,), (1,), (2,)]` will minimize all interactions involving one of these features.
-#         loss_func : Callable
-#             Function that returns the point-wise loss l(y_hat, y), where y_hat could be a (N,) or (N, n_preds) array.
-#             See `utils.py` for common definitions of such functions.
-#         """
-#         super().fit(X)
-
-#         self.U = U
-#         assert isinstance(U, (list, tuple))
-#         assert isinstance(U[0], (list, tuple))
-#         assert np.shape(decomposition[U[0]]) == (self.N, self.N), "An Anchored decomposition with foreground=background is needed"
-#         R = []
-#         for u in U:
-#             assert len(u) == 1, f"MinimizeLossGameSuperset only suppports main effects. Not {len(u)}-way interactions."
-#             R.append(decomposition[u] + decomposition[()])
-#         self.R = np.stack(R, axis=-1)
-#         self.n_regions = 0
-#         # Loss function is the difference between pure and full effects
-#         self.predictions = decomposition[()]
-#         self.y = y
-#         self.loss_func = loss_func
-#         loss = self.get_loss(np.arange(self.N)) / self.N
-#         self.loss_factor = 1 / loss
-#         # Start recursive tree growth
-#         self.root, self.final_objective, self.n_regions = self._tree_builder(np.arange(self.N), depth=0, loss=loss)
-#         self.final_loss = self.final_objective - self.alpha * self.n_regions
-#         return self
-
-
-#     def get_loss(self, instances_idx: np.ndarray):
-#         """
-#         For each subset u in U, we report the pure-vs-full interaction disagreements and average them.
-#         """
-#         pred_subset = self.predictions[instances_idx]
-#         y_subset = self.y[instances_idx]
-#         instances_idx = instances_idx[:, np.newaxis]
-#         R_subset = self.R[instances_idx, instances_idx.T]
-#         pure_effect, full_effect = get_pure_full_risk_effects(
-#                                                             R_subset,
-#                                                             pred_subset,
-#                                                             y_subset,
-#                                                             self.loss_func
-#                                                         )
-#         return np.sum((full_effect - pure_effect)**2)
+def get_pure_full_risk_effects(
+        R: np.ndarray,
+        preds: np.ndarray,
+        y: np.ndarray,
+        loss_func: Callable[[np.ndarray, np.ndarray], np.ndarray]
+        ):
+    # nu(S) = loss_func( E[f(x_s, X_{-S}] , y )
+    N = len(preds)
+    # nu(i) - nu(empty)
+    pure_effect = loss_func(R.mean(1), y) - loss_func(preds.mean()*np.ones(N), y)
+    # nu(D) - nu(-i)
+    full_effect = loss_func(preds, y) - loss_func(R.mean(0), y)
+    return pure_effect, full_effect
 
 
 
-def get_marginal_conditional_effects(binned_feature: np.ndarray[int], R: np.ndarray):
-    marginal_effect = R.mean(1)
-    conditional_effect = np.zeros((binned_feature.shape[0],))
-    for b in np.unique(binned_feature):
-        inside_bin = np.where(binned_feature == b)[0][:, np.newaxis]
-        conditional_effect[inside_bin.ravel()] = R[inside_bin, inside_bin.T].mean(1)
-    return marginal_effect, conditional_effect
-
-
-
-def get_marginal_vs_conditional_pure_loss_fn(
+def get_marginal_pure_vs_full_risk_loss_fn(
             decomposition: Dict[Tuple[int], np.ndarray],
             U: List[Tuple[int]],
-            binned_features: List[np.ndarray[int]]
+            y: np.ndarray,
+            risk_fn: Callable[[np.ndarray, np.ndarray], np.ndarray]
             ):
-    """
-    Return the loss function that computes the error between PDP and MPlot for a subset of features
-
-    Parameters
-    ----------
-    decomposition : Dict[Tuple[int], np.ndarray]
-        The functional decomposition used to compute the objective.
-        It needs to be anchored with foreground=background i.e.
-        `decomposition[(0,)].shape = (N, N)`.
-    U : List[Tuple[int]]
-        A subset of the powerset whose sum of pure-vs-full interactions are minimized. For example
-        passing `U=[(0,), (1,), (2,)]` will minimize all marginal-vs-conditional effects of these features.
-    binned_features : List[np.ndarray[int]]
-        The ith element is an array of shape (N,) that stores the binned value of feature i.
-        Used to compute conditional expectations.
-    """
 
     check_loss_args(decomposition, U)
-    R_matrices = []
-    for u in U:
-        assert len(u) == 1, f"PDPvsMPlot only suppports main effects. Not {len(u)}-way interactions."
-        R_matrices.append(decomposition[u] + decomposition[()])
-    assert len(U) == len(binned_features), "A binned_features must be provided for each features in U."
-    local_binned_features = binned_features
+    assert callable(risk_fn)
+    assert len(y) == len(decomposition[()])
+    R = decomposition_to_R(decomposition)
+    R = np.stack([R[u] for u in U], axis=-1)  # (N, N, |U|)
+    predictions = decomposition[()]
+    local_y = y
+    local_risk_fn = risk_fn
 
 
-    def loss_fn(instances_idx: np.ndarray[int]):
-        # Iterate over all splits
+    def get_loss(instances_idx: np.ndarray):
+        """
+        For each subset u in U, we report the pure-vs-full interaction disagreements and average them.
+        """
+        pred_subset = predictions[instances_idx]
+        y_subset = local_y[instances_idx]
         instances_idx = instances_idx[:, np.newaxis]
-        loss = 0
-        for R, binned_feature in zip(R_matrices, local_binned_features):
-            R_subset = R[instances_idx, instances_idx.T]
-            binned_feature_subset = binned_feature[instances_idx.ravel()]
-            marginal, conditional = get_marginal_conditional_effects(binned_feature_subset, R_subset)
-            loss += np.sum((marginal - conditional)**2)
-        return loss
-    return loss_fn
+        R_subset = R[instances_idx, instances_idx.T]
+        pure_effect, full_effect = get_pure_full_risk_effects(
+                                                            R_subset,
+                                                            pred_subset,
+                                                            y_subset,
+                                                            local_risk_fn
+                                                        )
+        return np.sum((full_effect - pure_effect)**2)
+    return get_loss
 
 
 
@@ -225,6 +144,66 @@ def get_marginal_pure_vs_full_variance_loss_fn(
     return loss_fn
 
 
+# marginal_vs_conditional_pure -> difference between PDP and MPlot
+# marginal_vs_conditional_full_variance -> difference marginal and conditional total Sobol indices
+# marginal_vs_conditional_full_risk -> difference between PFI and cPFI
+
+
+def get_marginal_conditional_effects(binned_feature: np.ndarray[int], R: np.ndarray):
+    marginal_effect = R.mean(1)
+    conditional_effect = np.zeros((binned_feature.shape[0],))
+    for b in np.unique(binned_feature):
+        inside_bin = np.where(binned_feature == b)[0][:, np.newaxis]
+        conditional_effect[inside_bin.ravel()] = R[inside_bin, inside_bin.T].mean(1)
+    return marginal_effect, conditional_effect
+
+
+
+def get_marginal_vs_conditional_pure_loss_fn(
+            decomposition: Dict[Tuple[int], np.ndarray],
+            U: List[Tuple[int]],
+            binned_features: List[np.ndarray[int]]
+            ):
+    """
+    Return the loss function that computes the error between PDP and MPlot for a subset of features
+
+    Parameters
+    ----------
+    decomposition : Dict[Tuple[int], np.ndarray]
+        The functional decomposition used to compute the objective.
+        It needs to be anchored with foreground=background i.e.
+        `decomposition[(0,)].shape = (N, N)`.
+    U : List[Tuple[int]]
+        A subset of the powerset whose sum of pure-vs-full interactions are minimized. For example
+        passing `U=[(0,), (1,), (2,)]` will minimize all marginal-vs-conditional effects of these features.
+    binned_features : List[np.ndarray[int]]
+        The ith element is an array of shape (N,) that stores the binned value of feature i.
+        Used to compute conditional expectations.
+    """
+
+    check_loss_args(decomposition, U, binned_features)
+    R_matrices = []
+    for u in U:
+        assert len(u) == 1, f"PDPvsMPlot only suppports main effects. Not {len(u)}-way interactions."
+        R_matrices.append(decomposition[u] + decomposition[()])
+    assert len(U) == len(binned_features), "A binned_features must be provided for each features in U."
+    local_binned_features = binned_features
+
+
+    def loss_fn(instances_idx: np.ndarray[int]):
+        # Iterate over all splits
+        instances_idx = instances_idx[:, np.newaxis]
+        loss = 0
+        for R, binned_feature in zip(R_matrices, local_binned_features):
+            R_subset = R[instances_idx, instances_idx.T]
+            binned_feature_subset = binned_feature[instances_idx.ravel()]
+            marginal, conditional = get_marginal_conditional_effects(binned_feature_subset, R_subset)
+            loss += np.sum((marginal - conditional)**2)
+        return loss
+    return loss_fn
+
+
+
 
 def get_marginal_conditional_sobol(binned_feature, R):
     n_instances = len(binned_feature)
@@ -260,7 +239,7 @@ def get_marginal_vs_condition_full_variance_loss_fn(
         Used to compute conditional expectations.
     """
 
-    check_loss_args(decomposition, U)
+    check_loss_args(decomposition, U, binned_features)
     R_matrices = []
     for u in U:
         assert len(u) == 1, f"Marginal-vs-Conditional Sobol only suppports main effects. Not {len(u)}-way interactions."
@@ -276,6 +255,77 @@ def get_marginal_vs_condition_full_variance_loss_fn(
             R_subset = R[instances_idx, instances_idx.T]
             binned_feature_subset = binned_feature[instances_idx.ravel()]
             marginal, conditional = get_marginal_conditional_sobol(binned_feature_subset, R_subset)
+            loss += np.sum((marginal - conditional)**2)
+        return loss
+    return loss_fn
+
+
+
+def get_marginal_conditional_full_risk(binned_feature, R, y, risk_fn, risk_all_features=0.0):
+    n_instances = len(binned_feature)
+    marginal_risk = risk_fn(R.mean(0), y).mean(0)
+    conditional_risk = 0.0
+    for b in np.unique(binned_feature):
+        inside_bin = np.where(binned_feature == b)[0][:, np.newaxis]
+        ratio = len(inside_bin) / n_instances
+        subset_R = R[inside_bin, inside_bin.T].mean(0)
+        y_subset = y[inside_bin.ravel()]
+        conditional_risk += ratio * risk_fn(subset_R, y_subset).mean(0)
+    return risk_all_features - float(marginal_risk), \
+           risk_all_features - float(conditional_risk)
+
+
+
+def get_marginal_vs_condition_full_risk_loss_fn(
+            decomposition: Dict[Tuple[int], np.ndarray],
+            U: List[Tuple[int]],
+            binned_features: List[np.ndarray[int]],
+            y: np.ndarray,
+            risk_fn: Callable[[np.ndarray, np.ndarray], np.ndarray]
+            ):
+    """
+    Return the loss function that computes the error between PFI and cPFI
+
+    Parameters
+    ----------
+    decomposition : Dict[Tuple[int], np.ndarray]
+        The functional decomposition used to compute the objective.
+        It needs to be anchored with foreground=background i.e.
+        `decomposition[(0,)].shape = (N, N)`.
+    U : List[Tuple[int]]
+        A subset of the powerset whose sum of pure-vs-full interactions are minimized. For example
+        passing `U=[(0,), (1,), (2,)]` will minimize all marginal-vs-conditional effects of these features.
+    binned_features : List[np.ndarray[int]]
+        The ith element is an array of shape (N,) that stores the binned value of feature i.
+        Used to compute conditional expectations.
+    """
+
+    check_loss_args(decomposition, U, binned_features)
+    R_matrices = []
+    for u in U:
+        assert len(u) == 1, f"PFI-vs-cPFI only suppports main effects. Not {len(u)}-way interactions."
+        R_matrices.append(decomposition[u] + decomposition[()])
+    assert len(U) == len(binned_features), "A binned_features must be provided for each features in U."
+    local_binned_features = binned_features
+    local_y = y
+    local_risk_fn = risk_fn
+    risk_all_features = risk_fn(decomposition[()], y).mean()
+
+    def loss_fn(instances_idx: np.ndarray[int]):
+        # Iterate over all splits
+        instances_idx = instances_idx[:, np.newaxis]
+        loss = 0
+        for R, binned_feature in zip(R_matrices, local_binned_features):
+            R_subset = R[instances_idx, instances_idx.T]
+            y_subset = local_y[instances_idx.ravel()]
+            binned_feature_subset = binned_feature[instances_idx.ravel()]
+            marginal, conditional = get_marginal_conditional_full_risk(
+                                                    binned_feature_subset,
+                                                    R_subset,
+                                                    y_subset,
+                                                    local_risk_fn,
+                                                    risk_all_features
+                                                )
             loss += np.sum((marginal - conditional)**2)
         return loss
     return loss_fn

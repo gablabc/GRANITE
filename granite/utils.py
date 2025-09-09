@@ -462,7 +462,7 @@ def decomposition_to_R(decomposition: dict[Tuple[int], np.ndarray]) -> dict[Tupl
 
 # Loss functions used for the local-loss evaluation game
 
-def pointwise_squared_loss(y_hat: np.ndarray, y:np.ndarray) -> np.ndarray:
+def pointwise_squared_risk(y_hat: np.ndarray, y:np.ndarray) -> np.ndarray:
     """
     Compute the point wise squared loss
 
