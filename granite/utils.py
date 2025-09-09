@@ -456,8 +456,7 @@ def decomposition_to_R(decomposition: dict[Tuple[int], np.ndarray]) -> dict[Tupl
         for v in powerset(u):
             if v not in decomposition.keys():
                 raise Exception("The provided decomposition is not closed downward")
-            if len(v) > 0:
-                R[u] += decomposition[v]
+            R[u] = R[u] + decomposition[v]
     return R
 
 
