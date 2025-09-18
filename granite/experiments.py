@@ -62,7 +62,7 @@ def get_pure_full_risk_effects(
     pure_effect = loss_func(R.mean(1), y) - loss_func(preds.mean()*np.ones(N), y)
     # nu(D) - nu(-i)
     full_effect = loss_func(preds, y) - loss_func(R.mean(0), y)
-    return pure_effect, full_effect
+    return -1 * pure_effect, -1 * full_effect
 
 
 
@@ -271,8 +271,8 @@ def get_marginal_conditional_full_risk(binned_feature, R, y, risk_fn, risk_all_f
         subset_R = R[inside_bin, inside_bin.T].mean(0)
         y_subset = y[inside_bin.ravel()]
         conditional_risk += ratio * risk_fn(subset_R, y_subset).mean(0)
-    return risk_all_features - float(marginal_risk), \
-           risk_all_features - float(conditional_risk)
+    return float(marginal_risk) - risk_all_features, \
+           float(conditional_risk) - risk_all_features
 
 
 
