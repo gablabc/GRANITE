@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 from copy import deepcopy
 from itertools import combinations
 from graphviz import Digraph
@@ -106,8 +107,138 @@ def check_bar_args(phis, feature_labels, xerr):
     return phis, xerr, multiple_labels
 
 
+def overlay_bars(
+    data: list[dict[str, np.ndarray]],
+    feature_labels,
+    *,
+    metric_names: list[str] | None = None,
+    absolute: bool = False,
+    ax=None,
+    region_colors: list = None,
+    ordered_features: list[int] = None,
+    region_labels: list[str] | None = None,
+    add_legend: bool = True,
+    legend_kwargs: dict | None = None,
+):
+    """Plot Stacked Bar"""
 
-def bar(phis, feature_labels, threshold=None, xerr=None, absolute=False, ax=None, color=None):
+    if not data:
+        raise ValueError("`data` is empty.")
+    n_regions = len(data)
+
+    # Determine metric set and validate
+    if metric_names is None:
+        metric_names = list(data[0].keys())
+    for d in data:
+        missing = set(metric_names) - set(d.keys())
+        if missing:
+            raise ValueError(f"A region dict is missing metrics: {missing}")
+
+    # Stack into (M, R, F)
+    arrays = []
+    for m in metric_names:
+        arr = np.vstack([np.asarray(d[m]) for d in data])  # (R, F)
+        arrays.append(arr)
+    values = np.stack(arrays, axis=0)  # (M, R, F)
+    M, R, F = values.shape
+
+    # Mapper (absolute or signed)
+    bar_mapper = np.abs if absolute else (lambda x: x)
+
+    # Order features like your bar(...): by the first metric’s (mapped) values.
+    # Here we aggregate across regions to get a single score per feature.
+    base = bar_mapper(values[0]).sum(axis=0)  # (F,)
+    ordered_features = np.argsort(base) if ordered_features is None else ordered_features      # ascending like in your `bar(...)`
+    y_pos = np.arange(len(ordered_features))
+
+    # Create axis if needed
+    if ax is None:
+        plt.figure()
+        ax = plt.gca()
+
+    # Negative handling: if any negative after mapping rules (only possible if not absolute)
+    negative_vals = (values < 0).any() and not absolute
+    if negative_vals:
+        ax.axvline(0, 0, 1, color="k", linestyle="-", linewidth=1, zorder=1)
+
+    # Bar geometry to mirror your function
+    stacked_bars = M
+    bar_width = 0.7 / stacked_bars
+    if stacked_bars % 2 == 0:
+        shift =  [ (i+0.5)*bar_width for i in range(stacked_bars//2)[::-1]] \
+               + [-(i+0.5)*bar_width for i in range(stacked_bars//2)]
+    else:
+        shift =  [ (i+1)*bar_width for i in range(stacked_bars//2)[::-1]] + [0] \
+               + [-(i+1)*bar_width for i in range(stacked_bars//2)]
+
+    # Colors (match your DEEL edge & alpha scheme; per-region facecolor or single `color`)
+    edgecolor = (0.88, 0.89, 0.92)
+
+    if region_colors is None:
+        # fallback: cycle default colors per region
+        region_colors = [plt.get_cmap("tab20")(i / n_regions) for i in range(R)]
+
+    # Draw overlays: loop metrics (sided "stacks"), then features
+    for s in range(stacked_bars):
+        alpha = 1 - 0.75/stacked_bars * s  # same fade as your bar(...)
+        for idx, f in enumerate(ordered_features):
+            vals = values[s, :, f]                    # (R,)
+            mapped = bar_mapper(vals)                 # (R,)
+            order = np.argsort(-mapped)               # largest first
+            y = y_pos[idx] + shift[s]
+            for rank, r in enumerate(order):
+                v = float(mapped[r])
+                if v <= 0:
+                    continue
+                ax.barh(
+                    y, v,
+                    height=bar_width,
+                    left=0.0,
+                    color=region_colors[r],
+                    edgecolor=edgecolor,
+                    linewidth=0.6,
+                    #alpha=alpha,
+                    zorder=5 + rank,  # larger drawn first (lower z), smaller overlay on top
+                )
+
+    # Y ticks & labels (ONLY features, centered), fontsize matches your bar(...)
+    if isinstance(feature_labels, (list, tuple)) and feature_labels and isinstance(feature_labels[0], (list, tuple)):
+        yticklabels = [feature_labels[0][j] for j in ordered_features]
+    else:
+        yticklabels = [feature_labels[j] for j in ordered_features]
+    ax.set_yticks(list(y_pos))
+    ax.set_yticklabels(yticklabels, fontsize=15)
+
+    # Row separators (like your function)
+    for i in range(len(ordered_features)):
+        ax.axhline(i, color="k", lw=0.5, alpha=0.5, zorder=-1)
+
+    # Bounds & margins (mirror your x/ylim expansion)
+    xmin, xmax = ax.get_xlim()
+    ax.set_ylim(-0.5, len(ordered_features) - 0.5)
+    if negative_vals:
+        ax.set_xlim(xmin - (xmax - xmin) * 0.05, xmax + (xmax - xmin) * 0.05)
+    else:
+        ax.set_xlim(xmin, xmax + (xmax - xmin) * 0.05)
+
+    # Add legend (proxy patches so we don’t double-draw anything)
+    if add_legend:
+        handles = [
+            mpatches.Patch(
+                facecolor=region_colors[r],
+                edgecolor=edgecolor,
+                linewidth=0.6,
+                label=(region_labels[r] if region_labels else f"Region {r+1}")
+            )
+            for r in range(n_regions)
+        ]
+        ax.legend(handles=handles, **legend_kwargs)
+
+    plt.gcf().tight_layout()
+    return ax
+
+
+def bar(phis, feature_labels, threshold=None, xerr=None, absolute=False, ax=None, color=None, ordered_features:list[int] = None):
     """
     Plot Feature Importance/Attribution bars
 
@@ -146,8 +277,9 @@ def bar(phis, feature_labels, threshold=None, xerr=None, absolute=False, ax=None
             xerr = abs_map_xerr(phis, xerr)
     else:
         bar_mapper = lambda x : x
-        
-    ordered_features = np.argsort(bar_mapper(phis[0]))
+
+    if ordered_features is None:
+        ordered_features = np.argsort(bar_mapper(phis[0]))
     y_pos = np.arange(len(ordered_features))
     
     if ax is None:
