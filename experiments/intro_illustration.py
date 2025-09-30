@@ -67,6 +67,7 @@ def plot_disagreement_xai_methods():
     print(features.summary())
 
     # create the regions manually similar to the previous plot
+    # TODO: regions
     regions = {
         #"Full space": np.array([True] * X.shape[0]),
         "Region $X_2=1$": X[:, 1] == 1,
@@ -102,9 +103,7 @@ def plot_disagreement_xai_methods():
         )
         iv_region = explainer_sage.explain(budget=2 ** len(features))
         sage_values = np.asarray([abs(iv_region[(i,)]) for i in range(len(features))])
-        # explanations[region_name]["SAGE"] = sage_values
-
-        explanations[region_name]["SAGE"] = pure(marginal_game)
+        explanations[region_name]["SAGE"] = sage_values
 
         # PFI (PFI is full minus removed one at a time)
         explanations[region_name]["PFI"] = pfi(marginal_game)
@@ -120,7 +119,7 @@ def plot_disagreement_xai_methods():
             y_true=model_function(X_region),
             model=model_function,
             loss_function=mean_absolute_error,
-            sampling_rounds=20,
+            sampling_rounds=1,
             bins=binned_features,
             conditional_replacement=True
         )
