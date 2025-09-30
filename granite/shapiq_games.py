@@ -52,6 +52,8 @@ class GlobalRiskGame(Game):
         normalize: bool = True,
         random_state: int | None = 42,
         verbose: bool = False,
+        bins: list[np.ndarray] | None = None,
+        conditional_replacement: bool = False,
     ) -> None:
         """Initialize the GlobalExplanation game.
 
@@ -82,6 +84,16 @@ class GlobalRiskGame(Game):
             verbose: A flag to print information of the game. Defaults to ``False``.
 
             random_state: The random state to use for the imputer. Defaults to ``42``.
+
+            bins: A list of arrays specifying for each feature, which data points belong to which
+                bin for conditional sampling. If ``None``, no conditional sampling is
+                performed. Defaults to ``None``.
+
+            conditional_replacement: A flag to indicate whether to use conditional replacement
+                when replacing feature values. If ``True``, feature values are replaced with values
+                from the same bin. If ``False``, feature values are replaced with random values
+                from the entire column. Defaults to ``False``. This option is ignored if ``bins`` is
+                ``None``.
         """
         self._rng = np.random.default_rng(random_state)
 
@@ -92,6 +104,7 @@ class GlobalRiskGame(Game):
         # shuffle the data not column wise:
         shuffled_idx = self._rng.permutation(self.data.shape[0])
         self.data_shuffled = self.data[shuffled_idx]
+        # self.y_true = self.y_true[shuffled_idx]
         self.sampling_rounds = sampling_rounds
 
         # specify the number of samples to evaluate for the coalitions
@@ -111,6 +124,21 @@ class GlobalRiskGame(Game):
         empty_subset = self.data_shuffled[idx]
         empty_predictions = self.model(empty_subset)  # model call
         self.empty_loss: float = self.loss_function(y_true, empty_predictions)
+        full_predictions = self.model(data)
+        self.full_loss: float = self.loss_function(y_true, full_predictions)
+
+        # if bins are provided, check that conditional_replacement is True
+        # data_binned are of shape (n_samples, ) for each feature
+        self.data_binned: list[np.ndarray] = bins
+        if bins is None and conditional_replacement:
+            if verbose:
+                print(""
+                  "Warning: bins is None, but conditional_replacement is True. Ignoring "
+                  "conditional_replacement."
+              )
+            conditional_replacement = False
+        self.conditional_replacement = conditional_replacement
+        self.bins = [np.unique(bin) for bin in bins] if bins is not None else []
 
         # init the base game
         super().__init__(
@@ -140,15 +168,67 @@ class GlobalRiskGame(Game):
             if not any(coalition):
                 worth[i] = self.empty_loss
                 continue
+            if all(coalition):
+                worth[i] = self.full_loss
+                continue
             # get the subset of the data
             for _ in range(self.sampling_rounds):
                 idx = self._rng.choice(self.data.shape[0], size=self.n_samples_eval, replace=False)
                 row_subset, y_true = self.data[idx].copy(), self.y_true[idx]
-                # replace the features not part of the subset
-                row_subset[:, ~coalition] = self.data_shuffled[idx][:, ~coalition]
+                if not self.conditional_replacement:
+                    # replace the features not part of the subset
+                    row_subset[:, ~coalition] = self.data_shuffled[idx][:, ~coalition]
+                else:
+                    self._conditional_replace(row_subset, coalition, idx)
                 # get the predictions of the model on the subset
                 subset_predictions = self.model(row_subset)
                 # get the loss of the model on the subset
                 worth_coal += self.loss_function(y_true, subset_predictions)
             worth[i] = worth_coal / self.sampling_rounds
         return worth
+
+    def _conditional_replace(
+        self,
+        subset: NDArray[np.float64, np.dtype[np.float64]],
+        coalition: NDArray[np.bool_, np.dtype[np.bool_]],
+        idx: NDArray[np.int_, np.dtype[np.int_]],
+    ) -> None:
+        """Replace feature values conditionally based on bins.
+
+        For each feature j that is NOT in the coalition, and for each row r in `subset`,
+        we find the bin id of the *original* row `idx[r]` for feature j, then sample a
+        donor row from the background data that shares the same bin for feature j, and
+        copy that donor's value into `subset[r, j]`.
+        """
+        # safety checks
+        if not self.data_binned or len(self.data_binned) != subset.shape[1]:
+            raise ValueError(
+                "Conditional replacement requires `bins` for each feature. "
+                "Expected len(data_binned) == n_features."
+            )
+
+        for j in range(subset.shape[1]):
+            if coalition[j]:
+                continue  # keep original values for features inside the coalition
+
+            # Bin ids for the selected rows (aligned with `subset` / `idx`)
+            row_bin_ids = self.data_binned[j][idx]
+
+            # For each unique bin id among these rows, replace values from same-bin donors
+            unique_bin_ids = np.unique(row_bin_ids)
+            for bin_id in unique_bin_ids:
+                mask = (row_bin_ids == bin_id)  # which rows in `subset` share this bin
+                if not np.any(mask):
+                    continue
+
+                # Candidate donor indices from the *entire* background set for this feature/bin
+                donor_candidates = np.where(self.data_binned[j] == bin_id)[0]
+                if donor_candidates.size == 0:
+                    raise ValueError(
+                        f"No donor candidates found for feature {j} and bin {bin_id}. "
+                        "This should never happen."
+                    )
+
+                # Sample donors (with replacement) and copy the feature values
+                donors = self._rng.choice(donor_candidates, size=mask.sum(), replace=True)
+                subset[mask, j] = self.data[donors, j]
