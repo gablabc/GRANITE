@@ -488,7 +488,7 @@ def partial_dependence_plot(decomposition, foreground, features, idxs=None, plot
         n_rows = 1
     else:
         n_rows = ceil(len(order) / n_cols)
-    _, ax = plt.subplots(n_rows, n_cols, figsize=figsize)
+    fig, ax = plt.subplots(n_rows, n_cols, figsize=figsize)
     for iteration, i in enumerate(order):
         # Get axis to plot
         curr_ax = get_curr_axis(n_rows, n_cols, ax, iteration)
@@ -548,6 +548,7 @@ def partial_dependence_plot(decomposition, foreground, features, idxs=None, plot
         get_curr_axis(n_rows, n_cols, ax, iteration).set_axis_off()
         iteration += 1
 
+    return fig, ax
 #def partial_dependence_plot(decomposition, foreground, background, features, idxs=None,
 #                            groups_method=None, rules=None, fd_trees_kwargs={}, centered=True,
 #                            figsize=None, n_cols=5, plot_hist=False, normalize_y=True, alpha=0.01):
