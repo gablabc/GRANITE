@@ -223,7 +223,8 @@ class LocalConditionalGame(Game):
         x_explain: np.ndarray,
         data: np.ndarray,
         model: Callable[[np.ndarray], np.ndarray],
-        n_expectation_rounds: int = 5000,
+        n_expectation_rounds: int = 100,
+        sample_size: int | None = None,
         random_state: int | None = 42,
         bins: list[np.ndarray] | None = None,
     ) -> None:
@@ -239,6 +240,9 @@ class LocalConditionalGame(Game):
         # get the model, loss function, and y_true
         self.model = model
 
+        if sample_size is None:
+            sample_size = self.data.shape[0]
+        self.sample_size = sample_size
         self.n_expectation_rounds = n_expectation_rounds
 
         # if bins are provided, check that conditional_replacement is True
@@ -273,8 +277,8 @@ class LocalConditionalGame(Game):
         worth = np.zeros(coalitions.shape[0], dtype=float)
         for i, coalition in enumerate(coalitions):
             worth_coal = 0.0
-            row_subset = np.tile(self.x_explain, (self.n_expectation_rounds, 1))
             for _ in range(self.n_expectation_rounds):
+                row_subset = np.tile(self.x_explain, (self.sample_size, 1))
                 self._conditional_replace(row_subset, coalition)
                 # get the predictions of the model on the subset
                 subset_predictions = self.model(row_subset)

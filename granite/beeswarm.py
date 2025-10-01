@@ -150,6 +150,7 @@ def beeswarm_plot(
     rng_seed: int | None = 42,
     show: bool = True,
     show_colormap: bool = True,
+    feature_order: list[int] | None = None,
 ) -> plt.Axes | None:
     """Plots a beeswarm plot of SHAP-IQ interaction values. Based on the SHAP beeswarm plot[1]_.
 
@@ -219,7 +220,8 @@ def beeswarm_plot(
         all_global_interaction_vals = all_global_interaction_vals[1:]
 
     # Sort interactions by aggregated importance
-    feature_order = np.argsort(all_global_interaction_vals)[::-1]
+    if feature_order is None:
+        feature_order = np.argsort(all_global_interaction_vals)[::-1]
     if max_display is None:
         max_display = len(feature_order)
     num_interactions_to_display = min(max_display, len(feature_order))
