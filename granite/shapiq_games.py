@@ -221,6 +221,7 @@ class LocalConditionalGame(Game):
     def __init__(
         self,
         x_explain: np.ndarray,
+        data: np.ndarray,
         model: Callable[[np.ndarray], np.ndarray],
         n_expectation_rounds: int = 5000,
         random_state: int | None = 42,
@@ -232,6 +233,8 @@ class LocalConditionalGame(Game):
 
         # store a copy of the data and y_true
         self.x_explain = copy.deepcopy(x_explain)
+
+        self.data = copy.deepcopy(data)
 
         # get the model, loss function, and y_true
         self.model = model
@@ -313,4 +316,4 @@ class LocalConditionalGame(Game):
                 )
             # Sample donors (with replacement) and copy the feature values
             donors = self._rng.choice(donor_candidates, size=subset.shape[0], replace=True)
-            subset[:, j] = self.x_explain[donors, j]
+            subset[:, j] = self.data[donors, j]

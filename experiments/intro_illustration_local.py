@@ -121,6 +121,7 @@ def create_local_explanations(n_local_explanations: int = 5, random_state: int =
                 n_expectation_rounds=250,
                 random_state=random_state,
                 bins=binned_features,
+                data=X_region,
             )
             local_conditional_game.verbose = False
             local_conditional_game.precompute()
