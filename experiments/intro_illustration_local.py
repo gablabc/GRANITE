@@ -140,9 +140,9 @@ def create_local_explanations(n_local_explanations: int = 5, random_state: int =
             ))
 
             # pred-diff
-            pred_diff = pred_diff(local_conditional_game)
+            pred_diff_val = pred_diff(local_conditional_game)
             explanations.append(_make_storage_dict(
-                region_name=region_name, x_i=x_i, phi_i=pred_diff, instance_id=i, method_name="pred-diff"
+                region_name=region_name, x_i=x_i, phi_i=pred_diff_val, instance_id=i, method_name="pred-diff"
             ))
 
 
@@ -181,10 +181,10 @@ def plot_intro_illustration():
     region_names = data_df["region"].unique()
     method_names = data_df["method"].unique()
 
-    for method_i, method_name in enumerate(method_names):
+    # create a new figure with four subplots
+    fig, axes = plt.subplots(6, 2, figsize=(12, 10))
 
-        # create a new figure with four subplots
-        fig, axes = plt.subplots(6, 2, figsize=(12, 10))
+    for method_i, method_name in enumerate(method_names):
 
         for region_name in region_names:
             ax_idx = _region_name_to_subplot_idx(region_name)
@@ -214,12 +214,12 @@ def plot_intro_illustration():
             ax.set_xlabel("")  # remove xaxis label
             ax.set_ylabel(method_name)
 
-        plt.tight_layout()
-        plt.savefig(f"intro_illustration_local_{method_name.replace(' ', '_')}.pdf")
-        plt.show()
+    plt.tight_layout()
+    plt.savefig(f"intro_illustration_local.pdf")
+    plt.show()
 
 
 
 if __name__ == "__main__":
-    create_local_explanations(n_local_explanations=20, random_state=42)
+    create_local_explanations(n_local_explanations=300, random_state=42)
     plot_intro_illustration()
