@@ -58,7 +58,7 @@ def plot_disagreement_xai_methods():
         return np.asarray(pure_values).flatten()
 
     # We generate the data and models. The data X is stored in a (N, d) numpy array
-    X, model_function = generate_problem(70_000, 42)
+    X, model_function = generate_problem(20_000, 42)
     features = Features(
         X,
         names=[f"x{i}" for i in range(1, 5)],
@@ -69,10 +69,10 @@ def plot_disagreement_xai_methods():
     # create the regions manually similar to the previous plot
     # TODO: regions
     regions = {
-        #"Full space": np.array([True] * X.shape[0]),
+        "Full space": np.array([True] * X.shape[0]),
         "Region $X_2=1$": X[:, 1] == 1,
-        #"Region $X_3=1$": X[:, 2] == 1,
-        #"Region $X_2=1 \\wedge X_3=1$": (X[:, 1] == 1) & (X[:, 2] == 1)
+        "Region $X_3=1$": X[:, 2] == 1,
+        "Region $X_2=1 \\wedge X_3=1$": (X[:, 1] == 1) & (X[:, 2] == 1)
     }
 
     explanations: dict[str, dict[str, np.ndarray]] = {}
@@ -86,7 +86,7 @@ def plot_disagreement_xai_methods():
             data=X_region.copy(),
             y_true=model_function(X_region),
             model=model_function,
-            loss_function=mean_absolute_error,
+            loss_function=mean_squared_error,
             sampling_rounds=1,
         )
         marginal_game.verbose = True
@@ -118,7 +118,7 @@ def plot_disagreement_xai_methods():
             data=X_region,
             y_true=model_function(X_region),
             model=model_function,
-            loss_function=mean_absolute_error,
+            loss_function=mean_squared_error,
             sampling_rounds=1,
             bins=binned_features,
             conditional_replacement=True

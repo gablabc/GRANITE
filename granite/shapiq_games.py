@@ -148,6 +148,8 @@ class GlobalRiskGame(Game):
             verbose=verbose,
         )
 
+        self.idx = self._rng.choice(self.data.shape[0], size=self.n_samples_eval, replace=False)
+
     def value_function(self, coalitions: NDArray[None, bool]) -> NDArray[None, float]:
         """Return the worth of the coalitions for the global explanation game.
 
@@ -165,25 +167,34 @@ class GlobalRiskGame(Game):
         worth = np.zeros(coalitions.shape[0], dtype=float)
         for i, coalition in enumerate(coalitions):
             worth_coal = 0.0
-            if not any(coalition):
-                worth[i] = self.empty_loss
-                continue
-            if all(coalition):
-                worth[i] = self.full_loss
-                continue
+
+            #if not any(coalition):
+            #    worth[i] = self.empty_loss
+            #    continue
+            #if all(coalition):
+            #    worth[i] = self.full_loss
+            #    continue
             # get the subset of the data
             for _ in range(self.sampling_rounds):
-                idx = self._rng.choice(self.data.shape[0], size=self.n_samples_eval, replace=False)
-                row_subset, y_true = self.data[idx].copy(), self.y_true[idx]
-                if not self.conditional_replacement:
-                    # replace the features not part of the subset
-                    row_subset[:, ~coalition] = self.data_shuffled[idx][:, ~coalition]
-                else:
-                    self._conditional_replace(row_subset, coalition, idx)
-                # get the predictions of the model on the subset
-                subset_predictions = self.model(row_subset)
+                #idx = self._rng.choice(self.data.shape[0], size=self.n_samples_eval, replace=False)
+                row_subset, y_true = self.data.copy(), self.y_true.copy()
+                final_predictions = np.zeros(y_true.shape[0], dtype=float)
+                n_expectation_rounds = 5000
+
+                for _ in range(n_expectation_rounds):
+                    idx = self._rng.choice(self.data.shape[0], size=self.n_samples_eval, replace=False)
+
+                    if not self.conditional_replacement:
+                        # replace the features not part of the subset
+                        row_subset[:, ~coalition] = self.data_shuffled[idx][:, ~coalition]
+                    else:
+                        self._conditional_replace(row_subset, coalition, self.idx)
+                    # get the predictions of the model on the subset
+                    subset_predictions = self.model(row_subset)
+                    final_predictions += subset_predictions
+                final_predictions /= n_expectation_rounds
                 # get the loss of the model on the subset
-                worth_coal += self.loss_function(y_true, subset_predictions)
+                worth_coal += self.loss_function(y_true, final_predictions)
             worth[i] = worth_coal / self.sampling_rounds
         return worth
 
