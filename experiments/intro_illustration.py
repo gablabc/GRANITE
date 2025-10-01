@@ -40,22 +40,10 @@ def plot_disagreement_xai_methods():
     def pfi(game) -> np.ndarray:
         pfi_values = []
         full = game(tuple(range(len(features))))
-        print("Full:", full)
         for i in range(len(features)):
             removed_score = game(tuple(j for j in range(len(features)) if j != i))
             pfi_values.append(removed_score - full)
-            print("Removed", i, ":", removed_score, "->", removed_score - full)
         return np.asarray(pfi_values).flatten()
-
-    def pure(game) -> np.ndarray:
-        pure_values = []
-        empty = game(())
-        print("Empty:", empty)
-        for i in range(len(features)):
-            only_i_score = game((i,))
-            pure_values.append(empty - only_i_score)
-            print("Only", i, ":", only_i_score, "->", only_i_score - empty)
-        return np.asarray(pure_values).flatten()
 
     # We generate the data and models. The data X is stored in a (N, d) numpy array
     X, model_function = generate_problem(20_000, 42)
@@ -87,7 +75,7 @@ def plot_disagreement_xai_methods():
             y_true=model_function(X_region),
             model=model_function,
             loss_function=mean_squared_error,
-            sampling_rounds=1,
+            n_expectation_rounds=5000,
         )
         marginal_game.verbose = True
         marginal_game.precompute()
@@ -119,7 +107,7 @@ def plot_disagreement_xai_methods():
             y_true=model_function(X_region),
             model=model_function,
             loss_function=mean_squared_error,
-            sampling_rounds=1,
+            n_expectation_rounds=5000,
             bins=binned_features,
             conditional_replacement=True
         )
@@ -199,11 +187,6 @@ def plot_disagreement_xai_methods():
                    bbox_to_anchor=(0.5, -0.01))
 
     plt.show()
-
-
-
-
-
 
 
 if __name__ == "__main__":

@@ -46,10 +46,8 @@ class GlobalRiskGame(Game):
         y_true: np.ndarray,
         model: Callable[[np.ndarray], np.ndarray],
         loss_function: Callable[[np.ndarray, np.ndarray], float],
+        n_expectation_rounds: int = 5000,
         n_samples_eval: int | None = None,
-        n_samples_empty: int | None = None,
-        sampling_rounds: int = 1,
-        normalize: bool = True,
         random_state: int | None = 42,
         verbose: bool = False,
         bins: list[np.ndarray] | None = None,
@@ -60,6 +58,8 @@ class GlobalRiskGame(Game):
         Args:
             data: The background data used to fit the imputer. Should be a 2d matrix of shape
                 ``(n_samples, n_features)``.
+
+            y_true: The true values for the data. Should be a 1d vector of shape ``(n_samples,)``.
 
             model: The model to explain as a callable function expecting data points as input and
                 returning the model's predictions. The input should be a 2d matrix of shape
@@ -73,13 +73,9 @@ class GlobalRiskGame(Game):
                 ``None`` or greater than the number of samples in the background data, all samples
                 are used. Defaults to ``None``.
 
-            n_samples_empty: The number of samples to use for the empty subset of features. If
-                ``None`` or greater than the number of samples in the background data, all samples
-                are used. Defaults to ``None``.
-
-            normalize: A flag to normalize the game values. If ``True``, then the game values are
-                normalized and centered to be zero for the empty set of features. Defaults to
-                ``True``.
+            n_expectation_rounds: The number of random subsets to use for estimating the worth of
+                a coalition. More rounds lead to a more accurate estimate of the worth, but also
+                increase the computation time. Defaults to ``5000``.
 
             verbose: A flag to print information of the game. Defaults to ``False``.
 
@@ -104,28 +100,16 @@ class GlobalRiskGame(Game):
         # shuffle the data not column wise:
         shuffled_idx = self._rng.permutation(self.data.shape[0])
         self.data_shuffled = self.data[shuffled_idx]
-        # self.y_true = self.y_true[shuffled_idx]
-        self.sampling_rounds = sampling_rounds
 
         # specify the number of samples to evaluate for the coalitions
         if n_samples_eval is None:
             n_samples_eval = self.data_shuffled.shape[0]
         self.n_samples_eval = min(n_samples_eval, self.data_shuffled.shape[0])
+        self.n_expectation_rounds = n_expectation_rounds
 
         # get the model, loss function, and y_true
         self.model = model
         self.loss_function = loss_function
-
-        # get empty prediction
-        if n_samples_empty is None:
-            n_samples_empty = self.data_shuffled.shape[0]
-        n_samples_empty = min(n_samples_empty, self.data_shuffled.shape[0])
-        idx = self._rng.choice(self.data_shuffled.shape[0], size=n_samples_empty, replace=False)
-        empty_subset = self.data_shuffled[idx]
-        empty_predictions = self.model(empty_subset)  # model call
-        self.empty_loss: float = self.loss_function(y_true, empty_predictions)
-        full_predictions = self.model(data)
-        self.full_loss: float = self.loss_function(y_true, full_predictions)
 
         # if bins are provided, check that conditional_replacement is True
         # data_binned are of shape (n_samples, ) for each feature
@@ -143,8 +127,8 @@ class GlobalRiskGame(Game):
         # init the base game
         super().__init__(
             data.shape[1],
-            normalize=normalize,
-            normalization_value=self.empty_loss,
+            normalize=False,
+            normalization_value=0.0,
             verbose=verbose,
         )
 
@@ -167,35 +151,22 @@ class GlobalRiskGame(Game):
         worth = np.zeros(coalitions.shape[0], dtype=float)
         for i, coalition in enumerate(coalitions):
             worth_coal = 0.0
-
-            #if not any(coalition):
-            #    worth[i] = self.empty_loss
-            #    continue
-            #if all(coalition):
-            #    worth[i] = self.full_loss
-            #    continue
-            # get the subset of the data
-            for _ in range(self.sampling_rounds):
-                #idx = self._rng.choice(self.data.shape[0], size=self.n_samples_eval, replace=False)
-                row_subset, y_true = self.data.copy(), self.y_true.copy()
-                final_predictions = np.zeros(y_true.shape[0], dtype=float)
-                n_expectation_rounds = 5000
-
-                for _ in range(n_expectation_rounds):
-                    idx = self._rng.choice(self.data.shape[0], size=self.n_samples_eval, replace=False)
-
-                    if not self.conditional_replacement:
-                        # replace the features not part of the subset
-                        row_subset[:, ~coalition] = self.data_shuffled[idx][:, ~coalition]
-                    else:
-                        self._conditional_replace(row_subset, coalition, self.idx)
-                    # get the predictions of the model on the subset
-                    subset_predictions = self.model(row_subset)
-                    final_predictions += subset_predictions
-                final_predictions /= n_expectation_rounds
-                # get the loss of the model on the subset
-                worth_coal += self.loss_function(y_true, final_predictions)
-            worth[i] = worth_coal / self.sampling_rounds
+            row_subset, y_true = self.data.copy(), self.y_true.copy()
+            final_predictions = np.zeros(y_true.shape[0], dtype=float)
+            for _ in range(self.n_expectation_rounds):
+                idx = self._rng.choice(self.data.shape[0], size=self.n_samples_eval, replace=False)
+                if not self.conditional_replacement:
+                    # replace the features not part of the subset
+                    row_subset[:, ~coalition] = self.data_shuffled[idx][:, ~coalition]
+                else:
+                    self._conditional_replace(row_subset, coalition, self.idx)
+                # get the predictions of the model on the subset
+                subset_predictions = self.model(row_subset)
+                final_predictions += subset_predictions
+            final_predictions /= self.n_expectation_rounds
+            # get the loss of the model on the subset
+            worth_coal += self.loss_function(y_true, final_predictions)
+            worth[i] = worth_coal
         return worth
 
     def _conditional_replace(
@@ -243,3 +214,103 @@ class GlobalRiskGame(Game):
                 # Sample donors (with replacement) and copy the feature values
                 donors = self._rng.choice(donor_candidates, size=mask.sum(), replace=True)
                 subset[mask, j] = self.data[donors, j]
+
+
+class LocalConditionalGame(Game):
+
+    def __init__(
+        self,
+        x_explain: np.ndarray,
+        model: Callable[[np.ndarray], np.ndarray],
+        n_expectation_rounds: int = 5000,
+        random_state: int | None = 42,
+        bins: list[np.ndarray] | None = None,
+    ) -> None:
+        """Initialize the Local Conditional Game."""
+
+        self._rng = np.random.default_rng(random_state)
+
+        # store a copy of the data and y_true
+        self.x_explain = copy.deepcopy(x_explain)
+
+        # get the model, loss function, and y_true
+        self.model = model
+
+        self.n_expectation_rounds = n_expectation_rounds
+
+        # if bins are provided, check that conditional_replacement is True
+        # data_binned are of shape (n_samples, ) for each feature
+        self.data_binned: list[np.ndarray] = bins
+        if bins is None:
+            raise ValueError("bins must be provided for LocalConditionalGame.")
+        self.bins = [np.unique(bin) for bin in bins]
+
+        # init the base game
+        super().__init__(
+            n_players=x_explain.shape[1],
+            normalize=False,
+            normalization_value=0.0,
+            verbose=False,
+        )
+
+    def value_function(self, coalitions: NDArray[None, bool]) -> NDArray[None, float]:
+        """Return the worth of the coalitions for the local conditional game.
+
+        The worth of a coalition in the local conditional game is the prediction of the model on
+        a random subset of the data point where the features not part of the coalition are replaced
+        by values from the same bin.
+
+        Args:
+            coalitions: The coalitions as a one-hot matrix for which the game is to be evaluated.
+
+        Returns:
+            The worth of the coalitions as a vector of length `n_coalitions`.
+
+        """
+        worth = np.zeros(coalitions.shape[0], dtype=float)
+        for i, coalition in enumerate(coalitions):
+            worth_coal = 0.0
+            row_subset = np.tile(self.x_explain, (self.n_expectation_rounds, 1))
+            for _ in range(self.n_expectation_rounds):
+                self._conditional_replace(row_subset, coalition)
+                # get the predictions of the model on the subset
+                subset_predictions = self.model(row_subset)
+                worth_coal += float(np.mean(subset_predictions))
+            worth_coal /= self.n_expectation_rounds
+            worth[i] = worth_coal
+        return worth
+
+    def _conditional_replace(
+        self,
+        subset: NDArray[np.float64, np.dtype[np.float64]],
+        coalition: NDArray[np.bool_, np.dtype[np.bool_]],
+    ) -> None:
+        """Replace feature values conditionally based on bins.
+
+        For each feature j that is NOT in the coalition, and for each row r in `subset`,
+        we find the bin id of the *original* row `idx[r]` for feature j, then sample a
+        donor row from the background data that shares the same bin for feature j, and
+        copy that donor's value into `subset[r, j]`.
+        """
+        # safety checks
+        if not self.data_binned or len(self.data_binned) != subset.shape[1]:
+            raise ValueError(
+                "Conditional replacement requires `bins` for each feature. "
+                "Expected len(data_binned) == n_features."
+            )
+
+        for j in range(subset.shape[1]):
+            if coalition[j]:
+                continue
+            # Bin id for the explanation point
+            row_bin_id = self.data_binned[j][0]
+            # Candidate donor indices from the *entire* background set for this feature/bin
+            donor_candidates = np.where(self.data_binned[j] == row_bin_id)[0]
+            if donor_candidates.size == 0:
+                raise ValueError(
+                    f"No donor candidates found for feature {j} and bin {row_bin_id}. "
+                    "This should never happen."
+                )
+            # Sample donors (with replacement) and copy the feature values
+            donors = self._rng.choice(donor_candidates, size=subset.shape[0], replace=True)
+            subset[:, j] = self.x_explain[donors, j]
