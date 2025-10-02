@@ -111,6 +111,11 @@ class GlobalRiskGame(Game):
         self.model = model
         self.loss_function = loss_function
 
+        self.idxs = []
+        for n_expectation_round in range(n_expectation_rounds):
+            self.idxs.append(self._rng.choice(self.data.shape[0], size=self.n_samples_eval, replace=False))
+
+
         # if bins are provided, check that conditional_replacement is True
         # data_binned are of shape (n_samples, ) for each feature
         self.data_binned: list[np.ndarray] = bins
@@ -154,12 +159,11 @@ class GlobalRiskGame(Game):
             row_subset, y_true = self.data.copy(), self.y_true.copy()
             final_predictions = np.zeros(y_true.shape[0], dtype=float)
             for _ in range(self.n_expectation_rounds):
-                idx = self._rng.choice(self.data.shape[0], size=self.n_samples_eval, replace=False)
                 if not self.conditional_replacement:
                     # replace the features not part of the subset
-                    row_subset[:, ~coalition] = self.data_shuffled[idx][:, ~coalition]
+                    row_subset[:, ~coalition] = self.data_shuffled[self.idxs[_]][:, ~coalition]
                 else:
-                    self._conditional_replace(row_subset, coalition, self.idx)
+                    self._conditional_replace(row_subset, coalition, self.idxs[_])
                 # get the predictions of the model on the subset
                 subset_predictions = self.model(row_subset)
                 final_predictions += subset_predictions
