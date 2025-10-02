@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.colors as mcolors
 from copy import deepcopy
 from itertools import combinations
 from graphviz import Digraph
@@ -988,3 +989,35 @@ def decomposition_graph(decomposition, feature_names):
     
     
     return dot
+
+
+def get_red_white_blue_cmap(red="#ff0d57", white="#ffffff", blue="#1e88e5") -> mcolors.LinearSegmentedColormap:
+    """Creates a custom diverging colormap (red-white-blue by default).
+
+    Args:
+        red: Color at the low end (can be hex, RGB tuple, etc.)
+        white: Middle color (default: pure white)
+        blue: Color at the high end
+
+    Returns:
+        A LinearSegmentedColormap object.
+    """
+
+    gray_rgb = np.array([0.51615537, 0.51615111, 0.5161729])
+
+    colors = [
+        (0.0, blue),
+        (0.25, blue),
+        (0.5, white),
+        (0.75, red),
+        (1.0, red),
+    ]
+
+    cmap = mcolors.LinearSegmentedColormap.from_list("custom_div", colors)
+
+    # Handle NaNs and out-of-range values
+    cmap.set_bad(gray_rgb.tolist(), 1.0)
+    cmap.set_over(gray_rgb.tolist(), 1.0)
+    cmap.set_under(gray_rgb.tolist(), 1.0)
+
+    return cmap
