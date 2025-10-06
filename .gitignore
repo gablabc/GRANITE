@@ -4,6 +4,7 @@ granite.egg-info
 *.sh
 *.png
 *joblib
+*.pdf
 granite/cached_data/
 datasets/
 tutorials/
