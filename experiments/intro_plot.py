@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from shapiq import InteractionValues
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Literal
 
 from granite.beeswarm import beeswarm_plot
 
@@ -24,10 +24,10 @@ def _arr_to_iv(phi: np.ndarray | list) -> InteractionValues:
 def _region_name_to_subplot_idx(region_name: str) -> Tuple[int, int]:
     """Maps region names to subplot indices."""
     mapping = {
-        "Full space": (0, 0),
-        "Region $X_2=1$": (0, 1),
-        "Region $X_3=1$": (1, 0),
-        "Region $X_2=1 \\wedge X_3=1$": (1, 1),
+        "Full space": (1, 0),
+        "Region $X_2=1$": (1, 1),
+        "Region $X_3=1$": (0, 0),
+        "Region $X_2=1 \\wedge X_3=1$": (0, 1),
     }
     return mapping[region_name]
 
@@ -41,6 +41,27 @@ def _default_region_order() -> List[str]:
         "Region $X_3=1$",
         "Region $X_2=1 \\wedge X_3=1$",
     ]
+
+
+def _title_for_region(region_name: str) -> str:
+    """Returns a display title for a given region name."""
+    titles = {
+        "Full space": "Full space",
+        "Region $X_2=1$": "Region: $X_2=1$",
+        "Region $X_3=1$": "Region: $X_3=1$",
+        "Region $X_2=1 \\wedge X_3=1$": "Region: $X_2=1$ & $X_3=1$",
+    }
+    return titles.get(region_name, region_name)
+
+
+def _method_name(method_code: str) -> str:
+    """Maps method codes to display names."""
+    mapping = {
+        "m-Shapley": "marginal Shapley",
+        "c-Shapley": "conditional Shapley",
+        "c-Full": "PredDiff",
+    }
+    return mapping.get(method_code, method_code)
 
 
 def _compute_agg_by_region_method(
@@ -146,16 +167,54 @@ def plot_intro_beeswarm_panel(
         plt.close()
 
 
+def _parse_feature_selector(s: int | str, n_features: int) -> int:
+    """Accepts 0-based int or 'X_i' (1-based); returns 0-based index."""
+    if isinstance(s, int):
+        idx = s
+    else:
+        s = str(s).strip()
+        if s.startswith(("X_", "x_")):
+            idx = int(s.split("_")[1]) - 1
+        else:
+            raise ValueError(f"Feature selector must be int or 'X_i', got {s}")
+    if not (0 <= idx < n_features):
+        raise IndexError(f"Feature index {idx} out of range [0, {n_features-1}]")
+    return idx
+
+
+def _normalize_highlight_map(
+    highlight_map: Dict[str, Dict[int | str, str | tuple]] | None,
+    n_features: int
+) -> Dict[str, Dict[int, tuple[str, float]]]:
+    """
+    Convert user mapping to {region: {feat_idx: (color, alpha)}} with 0-based indices.
+    Color may be 'moccasin' or ('moccasin', 0.2).
+    """
+    out: Dict[str, Dict[int, tuple[str, float]]] = {}
+    if not highlight_map:
+        return out
+    for region, per_feat in highlight_map.items():
+        out.setdefault(region, {})
+        for feat_sel, spec in per_feat.items():
+            idx = _parse_feature_selector(feat_sel, n_features)
+            if isinstance(spec, tuple) and len(spec) == 2:
+                color, alpha = spec
+            else:
+                color, alpha = spec, 0.12  # gentle default
+            out[region][idx] = (color, float(alpha))
+    return out
+
 # --- Plot 2: Variance panel (separate function) ---
-def plot_variance_panel(
+def plot_bar_panel(
     data_df: pd.DataFrame,
     *,
     feature_count: int = 4,
     figsize: Tuple[int, int] = (14, 10),
     method_colors: Dict[str, str] | None = None,
-    metric: str = "var",  # "var" (default) or "mae"
+    metric: Literal["var", "mae"] = "var",  # "var" (default) or "mae"
     savepath: str | None = "intro_illustration_variances.pdf",
     show: bool = True,
+    highlight_map: Dict[str, Dict[int | str, str | tuple]] | None = None,  # NEW
 ) -> None:
     """
     2x2 grid: one subplot per region.
@@ -164,17 +223,23 @@ def plot_variance_panel(
     metric:
         - "var": plots Var(phi) across samples
         - "mae": plots mean(|phi|) across samples
+
+    highlight_map:
+        Dict[region_name, Dict[feature_selector, color_or_(color, alpha)]]
+        - feature_selector: 0-based int or 'X_i' (1-based)
+        - color_or_(color, alpha): e.g., 'moccasin' or ('moccasin', 0.2)
     """
     # Normalize/validate metric
-    metric_norm = metric.strip().lower()
-    if metric_norm in {"mae", "mean_abs", "mean_absolute", "mean_absolute_error"}:
+    if metric == "mae":
         agg = "mae"
-        x_label = r"$\mathbb{E}[\,|\phi|\,]$"
+        x_label = "Regional mean of absolute feature effects"
         default_fname = "intro_illustration_phi_mae.pdf"
-    else:
+    elif metric == "var":
         agg = "var"
         x_label = r"Var($\phi$)"
         default_fname = "intro_illustration_variances.pdf"
+    else:
+        raise ValueError(f"Unknown metric: {metric}")
 
     if savepath is None:
         savepath = default_fname
@@ -217,9 +282,25 @@ def plot_variance_panel(
                 global_max = max(global_max, max(vals))
     x_max = global_max * 1.08 if global_max > 0 else 1.0
 
+    # Normalize highlight map once
+    norm_highlights = _normalize_highlight_map(highlight_map, n_features)
+
     for region_name in region_order:
         ax_row, ax_col = _region_name_to_subplot_idx(region_name)
         ax = axes[ax_row, ax_col]
+
+        # --- NEW: draw background bands for selected features in this region ---
+        if region_name in norm_highlights:
+            for feat_idx, (color, alpha) in norm_highlights[region_name].items():
+                # span the full feature stripe; draw behind bars/grid
+                ax.axhspan(
+                    feat_idx - 0.5,
+                    feat_idx + 0.5,
+                    facecolor=color,
+                    alpha=alpha,
+                    zorder=0,
+                    linewidth=0,
+                )
 
         # bars per method grouped by feature
         for m_j, m in enumerate(method_names):
@@ -228,148 +309,36 @@ def plot_variance_panel(
                 y + offsets[m_j],
                 x_vals,
                 height=bar_height,
-                label=m if (ax_row == 0 and ax_col == 0) else None,
+                label=_method_name(m) if (ax_row == 0 and ax_col == 0) else None,
                 color=method_colors[m],
+                zorder=2,  # ensure above spans/grid
+                edgecolor="white",
+                linewidth=0.75,
             )
 
-        ax.set_title(region_name, fontsize=14)
+        ax.set_title(_title_for_region(region_name), fontsize=14)
         ax.set_ylim(-0.5, n_features - 0.5)
         ax.set_xlim(0, x_max)
-        ax.grid(axis="x", linestyle=":", alpha=0.4)
+        # grid behind bars manually for styling
+        #ax.grid(axis="x", color="grey", linestyle="--", linewidth=0.75, zorder=1, alpha=0.7)
+        for x_pos in [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]:
+            ax.axvline(x_pos, color="white", linestyle="-", linewidth=1, zorder=1, alpha=0.8)
+            ax.axvline(x_pos, color="lightgrey", linestyle="dotted", linewidth=1, zorder=1)
         ax.set_yticks(y)
         ax.set_yticklabels([f"$X_{i+1}$" for i in range(n_features)], fontsize=11)
         if ax_col == 0:
-            ax.set_ylabel("Features")
+            ax.set_ylabel("Features", fontsize=12)
         if ax_row == 1:
-            ax.set_xlabel(x_label)
+            ax.set_xlabel(x_label, fontsize=12)
 
     # Shared legend on top
     handles = [plt.Rectangle((0, 0), 1, 1, color=method_colors[m]) for m in method_names]
-    fig.legend(handles, method_names, loc="upper center", ncol=len(method_names),
-               frameon=False, bbox_to_anchor=(0.5, 1.02))
-
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
-    if savepath:
-        plt.savefig(savepath, bbox_inches="tight")
-    if show:
-        plt.show()
-    else:
-        plt.close()
-
-
-def plot_phi_violins_panel(
-    data_df: pd.DataFrame,
-    *,
-    feature_count: int = 4,
-    figsize: Tuple[int, int] = (14, 10),
-    method_colors: Dict[str, str] | None = None,
-    savepath: str | None = "intro_illustration_phi_violins.pdf",
-    show: bool = True,
-) -> None:
-    """
-    2x2 grid: one subplot per region.
-    Within each subplot, features X1..Xk on the y-axis; for each feature, plot
-    grouped horizontal *violin* plots (one violin per method) colored via `method_colors`.
-    """
-    region_order = _default_region_order()
-    method_names = list(data_df["method"].unique())
-
-    # Colors per method (fallback to tab10 cycle if not provided)
-    if method_colors is None:
-        from matplotlib import cm
-        palette = cm.get_cmap("tab10").colors
-        method_colors = {m: palette[i % len(palette)] for i, m in enumerate(method_names)}
-    else:
-        from matplotlib import cm
-        palette = cm.get_cmap("tab10").colors
-        for i, m in enumerate(method_names):
-            if m not in method_colors:
-                method_colors[m] = palette[i % len(palette)]
-
-    n_features = feature_count
-    n_methods = len(method_names)
-
-    # Pre-extract phi arrays per (region, method): shape (n_samples, feature_count)
-    phi_cols = [f"phi_{i+1}" for i in range(feature_count)]
-    phi_data: Dict[str, Dict[str, np.ndarray]] = {r: {} for r in region_order}
-    for region_name in region_order:
-        for method_name in method_names:
-            subset_df = data_df[
-                (data_df["region"] == region_name) & (data_df["method"] == method_name)
-            ]
-            if subset_df.empty:
-                phi_data[region_name][method_name] = np.empty((0, feature_count))
-            else:
-                phi_data[region_name][method_name] = subset_df[phi_cols].to_numpy()
-
-    # Compute symmetric x-limits across all violins
-    global_abs_max = 0.0
-    for region_name in region_order:
-        for method_name in method_names:
-            arr = phi_data[region_name][method_name]
-            if arr.size:
-                global_abs_max = max(global_abs_max, np.nanmax(np.abs(arr)))
-    x_lim = global_abs_max * 1.1 if global_abs_max > 0 else 1.0
-
-    # Layout: 2x2 fixed by mapping function
-    fig, axes = plt.subplots(2, 2, figsize=figsize, sharex=True)
-    axes = np.array(axes)
-
-    # y positions for feature groups
-    y = np.arange(n_features)  # 0..k-1
-    total_height = 0.8
-    v_height = total_height / max(1, n_methods)
-    offsets = (-total_height / 2) + (np.arange(n_methods) + 0.5) * v_height
-
-    for region_name in region_order:
-        ax_row, ax_col = _region_name_to_subplot_idx(region_name)
-        ax = axes[ax_row, ax_col]
-
-        # For each method, draw a violin per feature at y+offset
-        for m_j, m in enumerate(method_names):
-            arr = phi_data[region_name][m]  # (n_samples, n_features)
-            # If no samples, skip
-            if arr.size == 0:
-                continue
-            for feat_idx in range(n_features):
-                data_1d = arr[:, feat_idx]
-                # Skip if all-NaN or empty
-                if data_1d.size == 0 or np.all(~np.isfinite(data_1d)):
-                    continue
-                v = ax.violinplot(
-                    [data_1d],  # expects a sequence
-                    positions=[y[feat_idx] + offsets[m_j]],
-                    vert=False,
-                    showmeans=False,
-                    showmedians=False,
-                    showextrema=False,
-                    widths=v_height * 0.95,
-                )
-                # Color the body
-                for body in v["bodies"]:
-                    body.set_facecolor(method_colors[m])
-                    body.set_edgecolor("black")
-                    body.set_linewidth(0.6)
-                    body.set_alpha(0.9)
-
-        # Styling
-        ax.set_title(region_name, fontsize=14)
-        ax.set_xlim(-x_lim, x_lim)
-        ax.set_ylim(-0.5, n_features - 0.5)
-        ax.axvline(0.0, color="0.3", lw=0.8, alpha=0.6)
-        ax.grid(axis="x", linestyle=":", alpha=0.4)
-
-        ax.set_yticks(y)
-        ax.set_yticklabels([f"$X_{i+1}$" for i in range(n_features)], fontsize=11)
-        if ax_col == 0:
-            ax.set_ylabel("Features")
-        if ax_row == 1:
-            ax.set_xlabel(r"$\phi$")
-
-    # Shared legend (top)
-    handles = [plt.Rectangle((0, 0), 1, 1, color=method_colors[m]) for m in method_names]
-    fig.legend(handles, method_names, loc="upper center", ncol=len(method_names),
-               frameon=False, bbox_to_anchor=(0.5, 1.02))
+    fig.legend(
+        handles, [_method_name(m) for m in method_names],
+        loc="upper center", ncol=len(method_names),
+        frameon=False,
+        fontsize=13
+    )
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     if savepath:
@@ -385,11 +354,14 @@ def plot_intro_illustration(
     figsize=(15, 10),
     plot_beeswarm: bool = False,
     plot_variance: bool = False,
-    plot_phi_violins: bool = False,
     plot_mae: bool = False,
+    method_selection: List[str] | None = None,
 ) -> None:
     """Plots the intro beeswarm panel, the variance panel, and the phi violin panel."""
     data_df = pd.read_csv("intro_illustration_local_explanations.csv")
+
+    if method_selection is not None:
+        data_df = data_df[data_df["method"].isin(method_selection)]
 
     if plot_beeswarm:
         plot_intro_beeswarm_panel(
@@ -400,37 +372,48 @@ def plot_intro_illustration(
             show=True,
         )
 
-    if plot_variance:
-        plot_variance_panel(
-            data_df,
-            feature_count=4,
-            figsize=figsize,
-            savepath="intro_illustration_variances.pdf",
-            show=True,
-        )
+    # shades of orange
+    method_color = {
+        "m-Shapley":  "#FFE569",
+        "c-Shapley": "#EBC836",
+        "c-Full": "#CAAB00",
+    }
+
+    alpha_highlight = 1.0
+    highlight_map_example = {
+        "Full space": {
+            "X_1": ("#3F88C5", alpha_highlight),  # highlight feature X2 softly
+            "X_2": ("#3F88C5", alpha_highlight),  # highlight feature X2 softly
+            "X_3": ("#57AA99", alpha_highlight),  # highlight feature X2 softly
+            "X_4": ("#57AA99", alpha_highlight),  # highlight feature X2 softly
+        },
+        "Region $X_2=1$": {
+            "X_3": ("#57AA99", alpha_highlight),  # highlight feature X2 softly
+            "X_4": ("#57AA99", alpha_highlight),  # highlight feature X2 softly
+        },
+        "Region $X_3=1$": {
+            "X_1": ("#3F88C5", alpha_highlight),  # highlight feature X2 softly
+            "X_2": ("#3F88C5", alpha_highlight),  # highlight feature X2 softly
+        },
+    }
 
     if plot_mae:
-        plot_variance_panel(
+        plot_bar_panel(
             data_df,
             feature_count=4,
             figsize=figsize,
             metric="mae",
             savepath="intro_illustration_phi_mae.pdf",
             show=True,
+            method_colors=method_color,
+            highlight_map=highlight_map_example,
         )
 
-    if plot_phi_violins:
-        plot_phi_violins_panel(
-            data_df,
-            feature_count=4,
-            figsize=figsize,
-            savepath="intro_illustration_phi_violins.pdf",
-            show=True,
-        )
 
 
 if __name__ == '__main__':
-    #plot_intro_illustration(figsize=(20, 20), plot_beeswarm=True, plot_variance=False)
-    # plot_intro_illustration(figsize=(9, 7), plot_variance=True)
-    plot_intro_illustration(figsize=(9, 7), plot_mae=True)
-    #plot_intro_illustration(figsize=(9, 7), plot_phi_violins=True)
+
+    methoods = [
+        "m-Shapley", "c-Shapley", "c-Full"
+    ]
+    plot_intro_illustration(figsize=(9, 7), plot_mae=True, method_selection=methoods)
