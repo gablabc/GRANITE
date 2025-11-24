@@ -6,7 +6,7 @@ import numpy as np
 from urllib.request import urlretrieve
 
 # Sklearn
-from sklearn.datasets import fetch_california_housing
+from sklearn.datasets import fetch_california_housing, load_diabetes
 from sklearn.preprocessing import OrdinalEncoder, FunctionTransformer
 from sklearn.compose import ColumnTransformer
 from sklearn.utils import shuffle
@@ -515,6 +515,36 @@ def get_data_kin8nm():
     feature_types = ["num"]*8
     features = Features(X, feature_names, feature_types)
     
+    return X, y, features
+
+
+def get_data_diabetes():
+    """
+    Load the diabetes dataset
+
+    Returns
+    -------
+    X : (N, d) np.ndarray
+        The input features
+    y : (N,) np.ndarray
+        The label
+    features : pyfd.features.Features
+        feature object
+    """
+
+    # load train
+    diabetes = load_diabetes()
+
+    X = diabetes.data
+    y = diabetes.target
+
+    # Use the feature names provided by sklearn
+    feature_names = diabetes.feature_names
+
+    # Generate Features object
+    feature_types = ["num"] * len(feature_names)
+    features = Features(X, feature_names, feature_types)
+
     return X, y, features
 
 

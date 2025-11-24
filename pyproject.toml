@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "granite"
 version = "0.0.1"
 authors = [
-    {name = "Gabriel Laberge", email = "gabriel.laberge@polymtl.ca"},
+    {name = "anoymous", email = "anoymous@mail.com"},
 ]
 description = "Generalized regional framework for identifying agreement in feature-based explanation"
 readme = "README.md"
