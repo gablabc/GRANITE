@@ -25,7 +25,8 @@ dependencies = [
   'omegaconf',
   "shapiq>=1.3.1",
   "overrides",
-  "seaborn"
+  "seaborn",
+  "simple_parsing"
 ]
 
 [tool.setuptools]

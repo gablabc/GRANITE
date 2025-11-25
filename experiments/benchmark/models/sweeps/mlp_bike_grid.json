@@ -1,0 +1,7 @@
+{
+    "hidden_layer_sizes": "eval_[(10, 5), (20, 10), (30, 15)]",
+    "learning_rate_init": "eval_np.logspace(-4, -1, 10)",
+    "alpha": "eval_np.logspace(-4, -1, 10)",
+    "momentum": [0.75, 0.9, 0.99, 0.999]
+}
+
