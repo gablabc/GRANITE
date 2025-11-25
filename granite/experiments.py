@@ -91,13 +91,14 @@ def get_marginal_pure_vs_full_risk_loss_fn(
         y_subset = local_y[instances_idx]
         instances_idx = instances_idx[:, np.newaxis]
         R_subset = R[instances_idx, instances_idx.T]
+        d = R.shape[2]
         pure_effect, full_effect = get_pure_full_risk_effects(
                                                             R_subset,
                                                             pred_subset,
                                                             y_subset,
                                                             local_risk_fn
                                                         )
-        return np.sum((full_effect - pure_effect)**2)
+        return np.sum((full_effect - pure_effect)**2) / d
     return get_loss
 
 

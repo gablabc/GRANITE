@@ -19,7 +19,8 @@ from sklearn.neural_network import MLPClassifier, MLPRegressor
 from granite.data import get_data_bike, Features
 from granite.decompositions import get_components_tree, get_components_brute_force
 from granite.experiments import get_marginal_pure_vs_full_loss_fn, get_marginal_vs_conditional_pure_loss_fn
-from granite.utils import create_bins_for_data
+from granite.experiments import get_marginal_pure_vs_full_risk_loss_fn, get_marginal_vs_condition_full_risk_loss_fn
+from granite.utils import create_bins_for_data, create_bins_for_data_partition_tree, pointwise_squared_risk
 
 
 
@@ -64,11 +65,12 @@ def setup_data(name):
 
     return X, y, features, task
 
-def subsample_data(x: np.ndarray, background_size: int, random_state: 42):
+def subsample_data(x: np.ndarray, y: np.ndarray, background_size: int, random_state: 42):
     np.random.seed(random_state)
     idx_choose = np.random.choice(range(len(x)), background_size, replace=False)
-    subsample = x[idx_choose]
-    return subsample
+    subsample_x = x[idx_choose]
+    subsample_y = y[idx_choose]
+    return subsample_x, subsample_y
 
 # Custom train/test split for reproducability (random_state is always 42 !!!)
 def get_train_test_split(X, y, task, random_state=42):
@@ -215,15 +217,19 @@ def get_functional_decomposition(
     return decomposition
 
 
-def get_granite_loss_functions(decomposition, background: np.ndarray, cat_features_indices=list[int]):
+def get_granite_loss_functions(
+        decomposition,
+        background: np.ndarray,
+        targets: np.ndarray,
+        task: str,
+        cat_features_indices=list[int]
+    ):
     N, d = background.shape
     U = [(i,) for i in range(d)]
-    _, binned_data = create_bins_for_data(
-        background,
-        cat_features_indices,
-        n_bins_numerical=5
-    )
+    # TODO genralize to classification
+    risk_fn = pointwise_squared_risk
     loss_functions = {}
+
 
     # Report the error between PDP and full-Marginal
     loss_functions['PDP_vs_ICE'] =\
@@ -232,17 +238,46 @@ def get_granite_loss_functions(decomposition, background: np.ndarray, cat_featur
             U=U
         )
 
+    # Bin along each feature to do Mplots
+    _, binned_data = create_bins_for_data(
+        background,
+        cat_features_indices,
+        n_bins_numerical=5
+    )
     loss_functions['PDP_vs_Mplot'] =\
         get_marginal_vs_conditional_pure_loss_fn(
             decomposition,
             U,
             binned_data
         )
+
+    loss_functions['PureRisk_vs_FullRisk'] =\
+        get_marginal_pure_vs_full_risk_loss_fn(
+            decomposition,
+            U,
+            y=targets,
+            risk_fn=risk_fn,
+        )
+
+    # Bin data using C-Trees
+    _, binned_data = create_bins_for_data_partition_tree(
+        background, cat_feature_indices=cat_features_indices, max_leaf_nodes=5
+    )
+    loss_functions['PFI_vs_CFI'] =\
+        get_marginal_vs_condition_full_risk_loss_fn(
+            decomposition,
+            U,
+            binned_data,
+            y=targets,
+            risk_fn=risk_fn
+        )
     return loss_functions
+
 
 
 def save_GRANITE_disagreements(disagreements: dict, dataset: str, model_name: str, random_state: int, cfg: Granite_Config):
     # Add elements to the dict
+    disagreements["loss_fn_minimized"] = cfg.loss_fn
     disagreements["dataset"] = dataset
     disagreements["model_name"] = model_name
     disagreements["random_state"] = random_state

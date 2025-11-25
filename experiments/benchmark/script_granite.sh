@@ -10,7 +10,7 @@ for seed in {0..4}
 do
     for model in gbt rf mlp
     do
-        for loss_fn in "PDP_vs_ICE" "PDP_vs_Mplot"
+        for loss_fn in "PDP_vs_ICE" "PDP_vs_Mplot" "PureRisk_vs_FullRisk" "PFI_vs_CFI"
         do
             for max_depth in {0..3}
             do
