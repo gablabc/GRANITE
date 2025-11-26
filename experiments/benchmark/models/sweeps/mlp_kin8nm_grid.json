@@ -1,5 +1,6 @@
 {
-    "hidden_layer_sizes": [(10, 5), (20, 10), (30, 15)],
+    "hidden_layer_sizes": [[10, 5], [20, 10], [30, 15], [40, 20], [40, 30, 20, 10], [30, 30, 20, 10]],
+    "activation": ["relu", "tanh"],
     "learning_rate_init": "eval_np.logspace(-4, -1, 10)",
     "alpha": "eval_np.logspace(-4, -1, 10)",
     "momentum": [0.75, 0.9, 0.99, 0.999]

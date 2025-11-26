@@ -327,6 +327,6 @@ def get_marginal_vs_condition_full_risk_loss_fn(
                                                     local_risk_fn,
                                                     risk_all_features
                                                 )
-            loss += np.sum((marginal - conditional)**2)
+            loss += np.sum((marginal - conditional)**2) * len(instances_idx)
         return loss
     return loss_fn
