@@ -16,7 +16,7 @@ from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostin
 from sklearn.neural_network import MLPClassifier, MLPRegressor
 
 
-from granite.data import get_data_bike, Features
+from granite.data import get_data_bike, get_data_kin8nm, Features
 from granite.decompositions import get_components_tree, get_components_brute_force
 from granite.experiments import get_marginal_pure_vs_full_loss_fn, get_marginal_vs_conditional_pure_loss_fn
 from granite.experiments import get_marginal_pure_vs_full_risk_loss_fn, get_marginal_vs_condition_full_risk_loss_fn
@@ -26,14 +26,17 @@ from granite.utils import create_bins_for_data, create_bins_for_data_partition_t
 
 DATASETS = {
     "bike": get_data_bike,
+    "kin8nm": get_data_kin8nm,
 }
 
 TASKS = {
     "bike": "regression",
+    "kin8nm": "regression",
 }
 
 CAT_FEATURES_INDICES = {
     "bike" : [0, 1, 3, 4, 5, 6],
+    "kin8nm" : [],
 }
 
 
@@ -65,12 +68,13 @@ def setup_data(name):
 
     return X, y, features, task
 
-def subsample_data(x: np.ndarray, y: np.ndarray, background_size: int, random_state: 42):
+def subsample_data(x: np.ndarray, y: np.ndarray, subsample_size: int, random_state: 42):
     np.random.seed(random_state)
-    idx_choose = np.random.choice(range(len(x)), background_size, replace=False)
-    subsample_x = x[idx_choose]
-    subsample_y = y[idx_choose]
-    return subsample_x, subsample_y
+    N = x.shape[0]
+    if subsample_size > N:
+        return x, y
+    idx_choose = np.random.choice(range(N), subsample_size, replace=False)
+    return x[idx_choose], y[idx_choose]
 
 # Custom train/test split for reproducability (random_state is always 42 !!!)
 def get_train_test_split(X, y, task, random_state=42):
