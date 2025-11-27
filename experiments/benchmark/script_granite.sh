@@ -20,7 +20,7 @@ do
             train_background_size_current=${train_background_size[iteration%n_models]}
             test_background_size_current=${test_background_size[iteration%n_models]}
             python3 2_train_granite.py --model_name=$model --dataset=$dataset --random_state=$seed \
-                --loss_fn=$loss_fn --alpha=0.01 --max_depth=$max_depth\
+                --loss_fn=$loss_fn --alpha=0.05 --max_depth=$max_depth\
                 --train_background_size=$train_background_size_current\
                 --test_background_size=$test_background_size_current
         done
