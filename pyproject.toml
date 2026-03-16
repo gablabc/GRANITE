@@ -8,7 +8,7 @@ version = "0.0.1"
 authors = [
     {name = "anoymous", email = "anoymous@mail.com"},
 ]
-description = "Generalized regional framework for identifying agreement in feature-based explanation"
+description = "Generalized Regional frAmework for ideNtIfying agreemenT in feature-based Explanation"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -37,4 +37,12 @@ packages = [
 
 [project.optional-dependencies]
 test = ["pytest"]
+dev = ["mypy", "black", "flake8"]
+
+[[tool.mypy.overrides]]
+module = ['pandas.*', 'sklearn.*', 'joblib', 'scipy.*']
+ignore_missing_imports = true
+
+[tool.black]
+line-length = 88
 

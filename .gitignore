@@ -7,5 +7,7 @@ granite.egg-info
 *.pdf
 *.csv
 granite/cached_data/
+build/
+experiments/benchmark/models/
 datasets/
 tutorials/
