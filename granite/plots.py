@@ -1,4 +1,5 @@
 import numpy as np
+from typing import List, Union, Dict, Tuple
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.colors as mcolors
@@ -1021,3 +1022,64 @@ def get_red_white_blue_cmap(red="#ff0d57", white="#ffffff", blue="#1e88e5") -> m
     cmap.set_under(gray_rgb.tolist(), 1.0)
 
     return cmap
+
+Decomposition = Dict[Tuple[int, ...], np.ndarray]
+
+def plot_main_effect_and_interactions(
+    decompositions: Union[Decomposition, List[Decomposition]],
+    backgrounds: Union[np.ndarray, List[np.ndarray]],
+    features,
+    figsize=None
+):
+    if isinstance(decompositions, dict):
+        decompositions = [decompositions]
+        backgrounds = [backgrounds]
+        n_regions = 1
+    else:
+        n_regions = len(decompositions)
+    
+    # Parameters shared across figures
+    max_abs_val = max([
+                    max([
+                        np.max(
+                            np.abs(decomposition[key].mean(1))
+                        ) for key in decomposition.keys() if len(key)> 0
+                    ]) for decomposition in decompositions]
+                )
+    min_feature_value = np.zeros(len(features))
+    max_feature_value = np.zeros(len(features))
+    for i in range(len(features)):
+        min_feature_value[i] = np.min([background[:, i].min() for background in backgrounds])
+        max_feature_value[i] = np.max([background[:, i].max() for background in backgrounds])
+
+    if figsize is None:
+        figsize = (2*len(features), 2*len(features))
+    all_figs, all_axes = [], []
+    for r in range(n_regions):
+        decomposition = decompositions[r]
+        background = backgrounds[r]
+        fig, axes = plt.subplots(len(features), len(features), figsize=figsize)
+        all_figs.append(fig)
+        all_axes.append(axes)
+        # We plot the pure (0, 1) interaction from `region 1`
+        for feature_1 in range(len(features)):
+            for feature_2 in range(len(features)):
+                curr_ax = axes[feature_1][feature_2]
+                if feature_1 > feature_2:
+                    curr_ax.remove()
+                elif feature_1 == feature_2:
+                    main_effect = decomposition[(feature_1,)].mean(1)
+                    curr_ax.scatter(background[:, feature_1], main_effect, c='k', s=1)
+                    curr_ax.set_xlabel(features.names()[feature_1])
+                    curr_ax.set_ylabel('Main effect')
+                    curr_ax.set_xlim(min_feature_value[feature_1], max_feature_value[feature_1])
+                    curr_ax.set_ylim(-max_abs_val, max_abs_val)
+                else:
+                    interactions = decomposition[(feature_1, feature_2)].mean(1),
+                    cbar = curr_ax.scatter(background[:, feature_2], background[:, feature_1], c=interactions, s=10, marker="s",
+                                                cmap='seismic', alpha=0.75, norm=mcolors.CenteredNorm(0, halfrange=max_abs_val))
+                    curr_ax.set_xlim(min_feature_value[feature_2], max_feature_value[feature_2])
+                    curr_ax.set_ylim(min_feature_value[feature_1], max_feature_value[feature_1])
+        fig.colorbar(cbar, ax=axes[0, len(features)-1])
+
+    return all_figs, all_axes
