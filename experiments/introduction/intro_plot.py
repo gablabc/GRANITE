@@ -20,6 +20,7 @@ def _arr_to_iv(phi: np.ndarray | list) -> InteractionValues:
         baseline_value=0,
     )
 
+
 # --- Region layout mapping (unchanged) ---
 def _region_name_to_subplot_idx(region_name: str) -> Tuple[int, int]:
     """Maps region names to subplot indices."""
@@ -183,8 +184,7 @@ def _parse_feature_selector(s: int | str, n_features: int) -> int:
 
 
 def _normalize_highlight_map(
-    highlight_map: Dict[str, Dict[int | str, str | tuple]] | None,
-    n_features: int
+    highlight_map: Dict[str, Dict[int | str, str | tuple]] | None, n_features: int
 ) -> Dict[str, Dict[int, tuple[str, float]]]:
     """
     Convert user mapping to {region: {feat_idx: (color, alpha)}} with 0-based indices.
@@ -203,6 +203,7 @@ def _normalize_highlight_map(
                 color, alpha = spec, 0.12  # gentle default
             out[region][idx] = (color, float(alpha))
     return out
+
 
 # --- Plot 2: Variance panel (separate function) ---
 def plot_bar_panel(
@@ -251,10 +252,14 @@ def plot_bar_panel(
     # Colors per method (fallback to tab10 cycle if not provided)
     if method_colors is None:
         from matplotlib import cm
+
         palette = cm.get_cmap("tab10").colors
-        method_colors = {m: palette[i % len(palette)] for i, m in enumerate(method_names)}
+        method_colors = {
+            m: palette[i % len(palette)] for i, m in enumerate(method_names)
+        }
     else:
         from matplotlib import cm
+
         palette = cm.get_cmap("tab10").colors
         for i, m in enumerate(method_names):
             if m not in method_colors:
@@ -304,7 +309,9 @@ def plot_bar_panel(
 
         # bars per method grouped by feature
         for m_j, m in enumerate(method_names):
-            x_vals = [agg_values[region_name][m][feat_idx] for feat_idx in range(n_features)]
+            x_vals = [
+                agg_values[region_name][m][feat_idx] for feat_idx in range(n_features)
+            ]
             ax.barh(
                 y + offsets[m_j],
                 x_vals,
@@ -320,10 +327,14 @@ def plot_bar_panel(
         ax.set_ylim(-0.5, n_features - 0.5)
         ax.set_xlim(0, x_max)
         # grid behind bars manually for styling
-        #ax.grid(axis="x", color="grey", linestyle="--", linewidth=0.75, zorder=1, alpha=0.7)
+        # ax.grid(axis="x", color="grey", linestyle="--", linewidth=0.75, zorder=1, alpha=0.7)
         for x_pos in [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]:
-            ax.axvline(x_pos, color="white", linestyle="-", linewidth=1, zorder=1, alpha=0.8)
-            ax.axvline(x_pos, color="lightgrey", linestyle="dotted", linewidth=1, zorder=1)
+            ax.axvline(
+                x_pos, color="white", linestyle="-", linewidth=1, zorder=1, alpha=0.8
+            )
+            ax.axvline(
+                x_pos, color="lightgrey", linestyle="dotted", linewidth=1, zorder=1
+            )
         ax.set_yticks(y)
         ax.set_yticklabels([f"$X_{i+1}$" for i in range(n_features)], fontsize=11)
         if ax_col == 0:
@@ -332,12 +343,16 @@ def plot_bar_panel(
             ax.set_xlabel(x_label, fontsize=12)
 
     # Shared legend on top
-    handles = [plt.Rectangle((0, 0), 1, 1, color=method_colors[m]) for m in method_names]
+    handles = [
+        plt.Rectangle((0, 0), 1, 1, color=method_colors[m]) for m in method_names
+    ]
     fig.legend(
-        handles, [_method_name(m) for m in method_names],
-        loc="upper center", ncol=len(method_names),
+        handles,
+        [_method_name(m) for m in method_names],
+        loc="upper center",
+        ncol=len(method_names),
         frameon=False,
-        fontsize=13
+        fontsize=13,
     )
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])
@@ -374,7 +389,7 @@ def plot_intro_illustration(
 
     # shades of orange
     method_color = {
-        "m-Shapley":  "#FFE569",
+        "m-Shapley": "#FFE569",
         "c-Shapley": "#EBC836",
         "c-Full": "#CAAB00",
     }
@@ -410,10 +425,7 @@ def plot_intro_illustration(
         )
 
 
+if __name__ == "__main__":
 
-if __name__ == '__main__':
-
-    methoods = [
-        "m-Shapley", "c-Shapley", "c-Full"
-    ]
-    plot_intro_illustration(figsize=(9, 7), plot_mae=True, method_selection=methoods)
+    methods = ["m-Shapley", "c-Shapley", "c-Full"]
+    plot_intro_illustration(figsize=(9, 7), plot_mae=True, method_selection=methods)
