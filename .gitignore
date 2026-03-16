@@ -1,4 +1,5 @@
 granite.egg-info
+.vscode
 *.pyc
 *.so
 *.sh
