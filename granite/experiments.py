@@ -68,26 +68,32 @@ def get_marginal_conditional_sobol(
     decomposition: Dict[Tuple[int, ...], np.ndarray],
 ):
     R = decomposition_to_R(decomposition)
-    return _get_marginal_conditional_sobol(binned_features, R)
-
-
-# Private variant that directly takes the R dictionnary.
-# This function is used internally by the GRANITE loss functions.
-def _get_marginal_conditional_sobol(
-    binned_features: List[np.ndarray],
-    R: Dict[Tuple[int, ...], np.ndarray],
-):
-    n_features = len(binned_features)
-    n_instances = len(binned_features[0])
+    n_features = len([u for u in decomposition.keys() if len(u) == 1])
     marginal_sobol = np.zeros(n_features)
     cond_sobol = np.zeros(n_features)
+    n_features = len(binned_features)
     for i in range(n_features):
-        R_i = R[(i,)]
-        marginal_sobol[i] = R_i.var(0).mean()
-        for b in np.unique(binned_features[i]):
-            inside_bin = np.where(binned_features[i] == b)[0]
-            ratio = len(inside_bin) / n_instances
-            cond_sobol[i] += ratio * R_i[inside_bin[:, np.newaxis], inside_bin].var(0).mean()
+        marginal_sobol[i], cond_sobol[i] = _get_marginal_conditional_sobol(
+            binned_features[i],
+            R[(i,)],
+        )
+    return marginal_sobol, cond_sobol
+
+
+# Private variant that directly takes the R matrix, binned feature
+# and returns the variance effects of a single feature.
+# This function is used internally by the GRANITE loss functions.
+def _get_marginal_conditional_sobol(
+    binned_feature: np.ndarray,
+    R_i: np.ndarray,
+):
+    n_instances = len(binned_feature)
+    marginal_sobol = R_i.var(0).mean()
+    cond_sobol = 0.0
+    for b in np.unique(binned_feature):
+        inside_bin = np.where(binned_feature == b)[0]
+        ratio = len(inside_bin) / n_instances
+        cond_sobol += ratio * R_i[inside_bin[:, np.newaxis], inside_bin].var(0).mean()
     return marginal_sobol, cond_sobol
 
 
@@ -95,30 +101,84 @@ def _get_marginal_conditional_sobol(
 #      Risk
 ###################
 
-# TODO
 
+# Public API
 def get_pure_full_risk_effects(
-    R: np.ndarray,
-    preds: np.ndarray,
+    decomposition: Dict[Tuple[int, ...], np.ndarray],
     y: np.ndarray,
     loss_func: Callable[[np.ndarray, np.ndarray], np.ndarray]
 ):
-    # nu(S) = loss_func( E[f(x_s, X_{-S}] , y )
-    N = len(preds)
-    # nu(i) - nu(empty)
-    pure_effect = loss_func(R.mean(1), y) - loss_func(preds.mean()*np.ones(N), y)
-    # nu(D) - nu(-i)
-    full_effect = loss_func(preds, y) - loss_func(R.mean(0), y)
-    return -1 * pure_effect, -1 * full_effect
+    # nu(S) = -loss_func( E[f(x_s, X_{-S}] , y )
+    preds = decomposition[()]
+    n_features = len([u for u in decomposition if len(u) == 1])
+    pure_effect = np.zeros(n_features)
+    full_effect = np.zeros(n_features)
+    for i in range(n_features):
+        R_i = decomposition[(i,)] + decomposition[()]
+        # nu(i) - nu(empty)
+        local_pure_effect, local_full_effect = _get_pure_full_risk_effects(
+            R_i,
+            preds,
+            y,
+            loss_func,
+        )
+        pure_effect[i] = local_pure_effect.mean()
+        full_effect[i] = local_full_effect.mean()
+    return pure_effect, full_effect
 
-def get_marginal_conditional_full_risk(binned_feature, R, y, risk_fn, risk_all_features=0.0):
+
+# Private API used by GRANITE
+def _get_pure_full_risk_effects(
+    R_i: np.ndarray,
+    preds: np.ndarray,
+    y: np.ndarray,
+    loss_func: Callable[[np.ndarray, np.ndarray], np.ndarray],
+):
+    # nu(i) - nu(empty)
+    N = len(preds)
+    pure_effect = -1 * ( loss_func(R_i.mean(1), y) - loss_func(preds.mean()*np.ones(N), y) )
+    # nu(D) - nu(-i)
+    full_effect = -1 * ( loss_func(preds, y) - loss_func(R_i.mean(0), y) )
+    return pure_effect, full_effect
+
+
+
+# Public API
+def get_marginal_conditional_full_risk(
+    binned_features: List[np.ndarray],
+    decomposition: Dict[Tuple[int, ...], np.ndarray],
+    y: np.ndarray,
+    risk_fn: Callable[[np.ndarray, np.ndarray], np.ndarray]
+):
+    preds = decomposition[()]
+    orig_risk = float(risk_fn(preds, y).mean())
+    n_features = len([u for u in decomposition if len(u) == 1])
+    marginal_effect = np.zeros(n_features)
+    cond_effect = np.zeros(n_features)
+    for i in range(n_features):
+        marginal_effect[i], cond_effect[i] = _get_marginal_conditional_full_risk(
+            binned_features[i],
+            decomposition[(i,)] + decomposition[()],
+            y,
+            risk_fn,
+        )
+    return marginal_effect - orig_risk, cond_effect - orig_risk
+
+
+# Private API used by GRANITE
+def _get_marginal_conditional_full_risk(
+    binned_feature: np.ndarray,
+    R: np.ndarray,
+    y: np.ndarray,
+    risk_fn: Callable[[np.ndarray, np.ndarray], np.ndarray],
+):
     n_instances = len(binned_feature)
     marginal_risk = risk_fn(R.mean(0), y).mean(0)
     conditional_risk = 0.0
     for b in np.unique(binned_feature):
-        inside_bin = np.where(binned_feature == b)[0][:, np.newaxis]
+        inside_bin = np.where(binned_feature == b)[0]
         ratio = len(inside_bin) / n_instances
-        subset_R = R[inside_bin, inside_bin.T].mean(0)
-        y_subset = y[inside_bin.ravel()]
+        subset_R = R[inside_bin[:, np.newaxis], inside_bin].mean(0)
+        y_subset = y[inside_bin]
         conditional_risk += ratio * risk_fn(subset_R, y_subset).mean(0)
-    return float(marginal_risk) - risk_all_features, float(conditional_risk) - risk_all_features
+    return float(marginal_risk), float(conditional_risk)
