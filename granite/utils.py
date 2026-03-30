@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 from copy import deepcopy
 from itertools import chain, combinations
-from typing import Tuple
+from typing import Tuple, Dict
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, KBinsDiscretizer, FunctionTransformer
 from sklearn.preprocessing import OneHotEncoder, SplineTransformer, QuantileTransformer
@@ -448,7 +448,9 @@ def get_quantiles(x_i, bins):
 
 
 
-def decomposition_to_R(decomposition: dict[Tuple[int], np.ndarray]) -> dict[Tuple[int], np.ndarray]:
+def decomposition_to_R(
+    decomposition: Dict[Tuple[int, ...], np.ndarray]
+)-> Dict[Tuple[int, ...], np.ndarray]:
     """ Apply a Mobieus inverse from the H matrices to the R matrices """
     R = {}
     for u in decomposition.keys():
