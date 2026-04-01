@@ -6,7 +6,7 @@ from typing import Any
 from utils import generate_data
 from granite.decompositions import get_components_brute_force
 from granite.fd_trees import FDTree
-from granite.experiments import get_marginal_pure_vs_full_loss_fn
+from granite.losses import get_marginal_pure_vs_full_loss_fn
 
 
 
