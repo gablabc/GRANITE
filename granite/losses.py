@@ -64,7 +64,7 @@ def get_marginal_pure_vs_full_loss_fn(
 
 def get_marginal_pure_vs_full_risk_loss_fn(
     decomposition: Dict[Tuple[int, ...], np.ndarray],
-    U: List[Tuple[int, ...]],
+    U: Sequence[Tuple[int, ...]],
     y: np.ndarray,
     risk_fn: Callable[[np.ndarray, np.ndarray], np.ndarray]
 ):
@@ -246,7 +246,7 @@ def get_marginal_vs_condition_full_variance_loss_fn(
 
 def get_marginal_vs_condition_full_risk_loss_fn(
     decomposition: Dict[Tuple[int, ...], np.ndarray],
-    U: List[Tuple[int, ...]],
+    U: Sequence[Tuple[int, ...]],
     binned_features: List[np.ndarray],
     y: np.ndarray,
     risk_fn: Callable[[np.ndarray, np.ndarray], np.ndarray]

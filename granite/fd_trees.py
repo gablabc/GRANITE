@@ -24,7 +24,7 @@ SYMBOLS = { True :
 
 class Node(object):
     """ Node in a Decision Tree """
-    def __init__(self, instances_idx: List[int], depth: int, loss: float):
+    def __init__(self, instances_idx: np.ndarray, depth: int, loss: float):
         self.N_samples = len(instances_idx)
         self.depth = depth
         self.loss = loss

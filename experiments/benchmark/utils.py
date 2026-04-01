@@ -12,17 +12,28 @@ from sklearn.model_selection import KFold, ShuffleSplit
 from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
-from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
+from sklearn.ensemble import (
+    HistGradientBoostingClassifier,
+    HistGradientBoostingRegressor,
+)
 from sklearn.neural_network import MLPClassifier, MLPRegressor
 
 
 from granite.data import get_data_bike, get_data_kin8nm, Features
 from granite.decompositions import get_components_tree, get_components_brute_force
-from granite.experiments import get_marginal_pure_vs_full_loss_fn, get_marginal_vs_conditional_pure_loss_fn
-from granite.experiments import get_marginal_pure_vs_full_risk_loss_fn, get_marginal_vs_condition_full_risk_loss_fn
-from granite.utils import create_bins_for_data, create_bins_for_data_partition_tree, pointwise_squared_risk
-
-
+from granite.losses import (
+    get_marginal_pure_vs_full_loss_fn,
+    get_marginal_vs_conditional_pure_loss_fn,
+)
+from granite.losses import (
+    get_marginal_pure_vs_full_risk_loss_fn,
+    get_marginal_vs_condition_full_risk_loss_fn,
+)
+from granite.utils import (
+    create_bins_for_data,
+    create_bins_for_data_partition_tree,
+    pointwise_squared_risk,
+)
 
 DATASETS = {
     "bike": get_data_bike,
@@ -35,29 +46,30 @@ TASKS = {
 }
 
 CAT_FEATURES_INDICES = {
-    "bike" : [0, 1, 3, 4, 5, 6],
-    "kin8nm" : [],
+    "bike": [0, 1, 3, 4, 5, 6],
+    "kin8nm": [],
 }
 
 
 ##### Dataclasses for parsing arguments ####
 
+
 @dataclass
 class Granite_Config:
-    loss_fn: Literal['PDP_vs_ICE', 'PureRisk_vs_FullRisk', 'PDP_vs_Mplot', 'PFI_vs_CFI']
+    loss_fn: Literal["PDP_vs_ICE", "PureRisk_vs_FullRisk", "PDP_vs_Mplot", "PFI_vs_CFI"]
     max_depth: int
     alpha: float
     train_background_size: int = 1000
     test_background_size: int = 2000
 
 
-
 @dataclass
 class Search_Config:
     n_splits: int = 5  # Number of train/valid splits
-    split_type: str = "K-Fold" # Type of cross-valid "Shuffle" "K-fold"
+    split_type: str = "K-Fold"  # Type of cross-valid "Shuffle" "K-fold"
     n_repetitions: int = 20  # Number of hyper-param candidates to evaluate
-    n_jobs: int = 1          # Number of parallel processes to run jobs
+    n_jobs: int = 1  # Number of parallel processes to run jobs
+
 
 ############################## Data Utilities ##############################
 
@@ -68,7 +80,10 @@ def setup_data(name):
 
     return X, y, features, task
 
-def subsample_data(x: np.ndarray, y: np.ndarray, subsample_size: int, random_state: 42):
+
+def subsample_data(
+    x: np.ndarray, y: np.ndarray, subsample_size: int, random_state: int = 42
+):
     np.random.seed(random_state)
     N = x.shape[0]
     if subsample_size > N:
@@ -76,13 +91,16 @@ def subsample_data(x: np.ndarray, y: np.ndarray, subsample_size: int, random_sta
     idx_choose = np.random.choice(range(N), subsample_size, replace=False)
     return x[idx_choose], y[idx_choose]
 
+
 # Custom train/test split for reproducability (random_state is always 42 !!!)
 def get_train_test_split(X, y, task, random_state=42):
     ratio = 0.2
     if task == "regression":
         return train_test_split(X, y, test_size=ratio, random_state=random_state)
     else:
-        return train_test_split(X, y, test_size=ratio, random_state=random_state, stratify=y)
+        return train_test_split(
+            X, y, test_size=ratio, random_state=random_state, stratify=y
+        )
 
 
 def get_scoring(task):
@@ -96,27 +114,25 @@ def get_scoring(task):
 ############################## Model Utilities ##############################
 
 
-
 MODELS = {
-         "rf" : {
-             "regression": RandomForestRegressor(),
-             "classification": RandomForestClassifier()
-         },
-         "gbt" : {
-             "regression": HistGradientBoostingRegressor(),
-             "classification": HistGradientBoostingClassifier()
-         },
-         "mlp" : {
-             "regression": MLPRegressor(max_iter=1000),
-             "classification": MLPClassifier(max_iter=1000)
-         }
-        }
+    "rf": {
+        "regression": RandomForestRegressor(),
+        "classification": RandomForestClassifier(),
+    },
+    "gbt": {
+        "regression": HistGradientBoostingRegressor(),
+        "classification": HistGradientBoostingClassifier(),
+    },
+    "mlp": {
+        "regression": MLPRegressor(max_iter=1000),
+        "classification": MLPClassifier(max_iter=1000),
+    },
+}
 
 
 def get_hp_grid(dataset: str, model_name: str) -> dict[str, Any]:
-    filename = os.path.join(
-        "models", "sweeps", f"{model_name}_{dataset}_grid.json"
-    )
+    filename = os.path.join("models", "sweeps", f"{model_name}_{dataset}_grid.json")
+
     def to_eval(string):
         if type(string) is str:
             split = string.split("_")
@@ -143,12 +159,13 @@ def get_hp_grid(dataset: str, model_name: str) -> dict[str, Any]:
     return hp_dict
 
 
-
 def get_cross_validator(k: int, task: str, random_state: int, split_type: str):
     # Train / Test split and cross-validator. Dont look at the test yet...
     if task == "regression":
         if split_type == "Shuffle":
-            cross_validator = ShuffleSplit(n_splits=k, test_size=0.1, random_state=random_state)
+            cross_validator = ShuffleSplit(
+                n_splits=k, test_size=0.1, random_state=random_state
+            )
         elif split_type == "K-Fold":
             cross_validator = KFold(n_splits=k, shuffle=True, random_state=random_state)
         else:
@@ -157,20 +174,23 @@ def get_cross_validator(k: int, task: str, random_state: int, split_type: str):
     # Binary Classification
     else:
         if split_type == "Shuffle":
-            cross_validator = StratifiedShuffleSplit(n_splits=k, test_size=0.1, random_state=random_state)
+            cross_validator = StratifiedShuffleSplit(
+                n_splits=k, test_size=0.1, random_state=random_state
+            )
         elif split_type == "K-Fold":
-            cross_validator = StratifiedKFold(n_splits=k, shuffle=True, random_state=random_state)
+            cross_validator = StratifiedKFold(
+                n_splits=k, shuffle=True, random_state=random_state
+            )
         else:
             raise ValueError("Wrong type of cross-validator")
 
     return cross_validator
 
 
-
 def load_model(dataset: str, model_name: str, random_state: int):
     # Random state used for fitting
     state = str(random_state)
-    file_path = os.path.join("models", dataset, model_name+"_"+str(state))
+    file_path = os.path.join("models", dataset, model_name + "_" + str(state))
 
     # Pickle model
     model = load(os.path.join(file_path, "model.joblib"))
@@ -178,7 +198,9 @@ def load_model(dataset: str, model_name: str, random_state: int):
     return model, perf
 
 
-def save_model(model: Any, dataset: str, model_name: str, random_state: int, perf_df: pd.DataFrame):
+def save_model(
+    model: Any, dataset: str, model_name: str, random_state: int, perf_df: pd.DataFrame
+):
 
     # Make folder models/dataset/models
     folder_path = os.path.join("models", dataset)
@@ -198,88 +220,84 @@ def save_model(model: Any, dataset: str, model_name: str, random_state: int, per
     perf_df.to_csv(os.path.join(file_path, "performance.csv"), index=False)
 
     # Save model hyperparameters
-    json.dump(model.get_params(), open(os.path.join(file_path, "hparams.json"), "w"), indent=4)
-
+    json.dump(
+        model.get_params(), open(os.path.join(file_path, "hparams.json"), "w"), indent=4
+    )
 
 
 ######################## GRANITE Utils ############################get#
 
 
 def get_functional_decomposition(
-        background: np.ndarray,
-        model: Any,
-        model_name: str,
-        features: Features,
-        ) -> dict[tuple[int, ...], np.ndarray]:
-    """ This function computes the FD and caches it locally. It already cached, then it load the decomposition """
+    background: np.ndarray,
+    model: Any,
+    model_name: str,
+    features: Features,
+) -> dict[tuple[int, ...], np.ndarray]:
+    """This function computes the FD and caches it locally. It already cached, then it load the decomposition"""
 
     # Use the partitioning tree
     if model_name in ["gbt", "rf"]:
-        decomposition = get_components_tree(model, background, background, features=features, anchored=True)
+        decomposition = get_components_tree(
+            model, background, background, features=features, anchored=True
+        )
     else:
-        decomposition = get_components_brute_force(model.predict, background, background, features=features, anchored=True)
+        decomposition = get_components_brute_force(
+            model.predict, background, background, features=features, anchored=True
+        )
     return decomposition
 
 
 def get_granite_loss_functions(
-        decomposition,
-        background: np.ndarray,
-        targets: np.ndarray,
-        task: str,
-        cat_features_indices=list[int]
-    ):
+    decomposition,
+    background: np.ndarray,
+    targets: np.ndarray,
+    task: str,
+    cat_features_indices=list[int],
+):
     N, d = background.shape
     U = [(i,) for i in range(d)]
     # TODO genralize to classification
     risk_fn = pointwise_squared_risk
     loss_functions = {}
 
-
     # Report the error between PDP and full-Marginal
-    loss_functions['PDP_vs_ICE'] =\
-        get_marginal_pure_vs_full_loss_fn(
-            decomposition=decomposition,
-            U=U
-        )
+    loss_functions["PDP_vs_ICE"] = get_marginal_pure_vs_full_loss_fn(
+        decomposition=decomposition, U=U
+    )
 
     # Bin along each feature to do Mplots
     _, binned_data = create_bins_for_data(
-        background,
-        cat_features_indices,
-        n_bins_numerical=5
+        background, cat_features_indices, n_bins_numerical=5
     )
-    loss_functions['PDP_vs_Mplot'] =\
-        get_marginal_vs_conditional_pure_loss_fn(
-            decomposition,
-            U,
-            binned_data
-        )
+    loss_functions["PDP_vs_Mplot"] = get_marginal_vs_conditional_pure_loss_fn(
+        decomposition, U, binned_data
+    )
 
-    loss_functions['PureRisk_vs_FullRisk'] =\
-        get_marginal_pure_vs_full_risk_loss_fn(
-            decomposition,
-            U,
-            y=targets,
-            risk_fn=risk_fn,
-        )
+    loss_functions["PureRisk_vs_FullRisk"] = get_marginal_pure_vs_full_risk_loss_fn(
+        decomposition,
+        U,
+        y=targets,
+        risk_fn=risk_fn,
+    )
 
     # Bin data using C-Trees
     _, binned_data = create_bins_for_data_partition_tree(
         background, cat_feature_indices=cat_features_indices, max_leaf_nodes=5
     )
-    loss_functions['PFI_vs_CFI'] =\
-        get_marginal_vs_condition_full_risk_loss_fn(
-            decomposition,
-            U,
-            binned_data,
-            y=targets,
-            risk_fn=risk_fn
-        )
+    loss_functions["PFI_vs_CFI"] = get_marginal_vs_condition_full_risk_loss_fn(
+        decomposition, U, binned_data, y=targets, risk_fn=risk_fn
+    )
     return loss_functions
 
 
-
-def save_GRANITE_disagreements(disagreements: dict, dataset: str, model_name: str, random_state: int, cfg: Granite_Config):
+def save_GRANITE_disagreements(
+    disagreements: dict,
+    dataset: str,
+    model_name: str,
+    random_state: int,
+    cfg: Granite_Config,
+):
     # Add elements to the dict
     disagreements["loss_fn_minimized"] = cfg.loss_fn
     disagreements["dataset"] = dataset
@@ -290,37 +308,13 @@ def save_GRANITE_disagreements(disagreements: dict, dataset: str, model_name: st
 
     dataframe = pd.DataFrame(disagreements, index=[0])
 
-    filepath = os.path.join("models", dataset, f"{model_name}_{random_state}", "results.csv")
+    filepath = os.path.join(
+        "models", dataset, f"{model_name}_{random_state}", "results.csv"
+    )
     if os.path.exists(filepath):
         existing_dataframe = pd.read_csv(filepath)
-        dataframe = pd.concat((existing_dataframe, dataframe), axis=0, ignore_index=True)
+        dataframe = pd.concat(
+            (existing_dataframe, dataframe), axis=0, ignore_index=True
+        )
 
     dataframe.to_csv(filepath, index=False)
-
-
-# def save_GRANITE(tree, dataset: str, model_name: str, random_state: int, cfg: Granite_Config):
-
-#     # Make folder for dataset models
-#     folder_path = os.path.join("models", dataset)
-#     file_path = os.path.join(folder_path, f"{model_name}_{random_state}")
-
-#     # Pickle model
-#     filename = f"{cfg.loss_fn}_{cfg.max_depth}_{cfg.alpha}_{cfg.train_background_size}"
-#     dump(tree, os.path.join(file_path, filename + ".joblib"))
-
-#     # Save the print
-#     tree_string = tree.print(return_string=True, verbose=True)
-#     with open(os.path.join(file_path, filename + ".txt"), "w") as f:
-#         f.write(tree_string)
-
-
-
-# def load_GRANITE(dataset, model_name, random_state, cfg):
-
-#     # Make folder for dataset models
-#     folder_path = os.path.join("models", dataset)
-#     file_path = os.path.join(folder_path, f"{model_name}_ {random_state}")
-
-#     # Pickle model
-#     filename = f"{cfg.loss_fn}_{cfg.max_depth}_{cfg.alpha}_{cfg.train_background_size}"
-#     return load(os.path.join(file_path, filename + ".joblib"))
