@@ -1,11 +1,11 @@
 
 # 🧱 Overview
 
-**GRANITE** (**G**eneralized **R**egional fr**A**mework for ide**N**tIfying agreemen**T** in 
-feature-based **E**xplanations) is a methodology that allows practitionners to reduce disagreements
-between post-hoc explanations that are arise due to feature **interactions** and **correlations**.
-By partitioning the input space into well-chosen rule-based regions, and restricting the data distribution
-to said regions when computing explanations, it becomes possible to attain agreement between various
+**GRANITE** (**G**eneralized **R**egional fr**A**mework for ide**N**tifying agreemen**T** in 
+feature-based **E**xplanations) allows ML practitionners to reduce disagreements
+between post-hoc explanation methods that arise due to feature **interactions** and **correlations**.
+By partitioning the input space into well-chosen rule-based regions and restricting the data distribution
+to said regions when computing explanations, we can reach unanimity among various
 post-hoc explanations methods.
 
 The method supports different kinds of post-hoc explainers.
